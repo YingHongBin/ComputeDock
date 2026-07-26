@@ -37,6 +37,22 @@ FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
 > 因此，过小的共享内存配置可能导致Unexpected bus error encountered in worker. This might be caused by insufficient shared memory异常
 - 通过-v $(pwd)/$USERNAME:/data将容器内的/data挂载至宿主机持久化
 
+```shell
+docker run -itd \ 
+    --gpus '"device=0,1"' \
+    --cpuset-cpus '0-15' \
+    -m 256G \
+    --memory-swap 256G \
+    --shm-size=128G \
+    --ulimit memlock=-1:-1 \
+    -p 52236:22 \
+    -e NEW_USER="hongbin" \
+    -e NEW_PWD="hongbinpwd" \
+    -v /data/hongbin:/home/hongbin \
+    --name hongbin \
+    dilab-base:cuda-12.8-v3 /bin/bash
+```
+
 # 潜在问题
 
 构建的容器在执行systemctl daemon-reload之后会出现显卡丢失的问题
