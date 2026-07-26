@@ -11,11 +11,17 @@ if [ -z "$NEW_PWD" ]; then
 fi
 
 # Create a sudo user account with a password and a /bin/bash shell
-useradd -m -d /data -G sudo -s /bin/bash $NEW_USER &>/dev/null
+useradd -m -G sudo -s /bin/bash $NEW_USER &>/dev/null
 echo "$NEW_USER:$NEW_PWD" | chpasswd
 
-# Start SSH service
-service ssh start
+# 复制 /etc/skel 中缺失的初始化文件
+if [[ ! -f "/home/${NEW_USER}/.bashrc" ]]; then
+    cp /etc/skel/.bashrc "/home/${NEW_USER}/.bashrc"
+fi
 
-# Switch to the new user
-su - $NEW_USER
+if [[ ! -f "/home/${NEW_USER}/.bash_profile" ]]; then
+    cp /etc/skel/.bash_profile "/home/${NEW_USER}/.bash_profile"
+fi
+
+mkdir -p /run/sshd
+exec /usr/sbin/sshd -D -e

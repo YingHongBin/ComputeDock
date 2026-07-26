@@ -53,6 +53,15 @@ RUN conda init bash
 RUN apt clean && rm -rf /tmp/* /var/tmp/* /var/lib/apt/lists/* /var/cache/apt/*
 RUN conda clean -a -y
 
+RUN printf '%s\n' \
+    'if [ -f "$HOME/.bashrc" ]; then' \
+    '    source "$HOME/.bashrc"' \
+    'fi' \
+    > /etc/skel/.bash_profile
+RUN echo '' >> /etc/skel/.bashrc && \
+    echo '# Initialize Conda' >> /etc/skel/.bashrc && \
+    echo 'source /opt/conda/etc/profile.d/conda.sh' >> /etc/skel/.bashrc
+
 # Set the entrypoint
 COPY ./init_container.sh /usr/local/bin/init_container.sh
 RUN chmod +x /usr/local/bin/init_container.sh
