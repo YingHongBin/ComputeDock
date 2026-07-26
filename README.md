@@ -35,10 +35,38 @@ FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
 > 3. PyTorch 的 tensor 默认支持共享内存以加速通信（pin_memory=True 时尤为明显）；<br>
 >
 > 因此，过小的共享内存配置可能导致Unexpected bus error encountered in worker. This might be caused by insufficient shared memory异常
-- 通过-v $(pwd)/$USERNAME:/data将容器内的/data挂载至宿主机持久化
+- 通过 `-v <宿主机目录>:/home/<容器用户名>` 持久化容器用户的 home 目录
+
+### 使用交互脚本创建容器
+
+仓库提供 `create_container.sh`，用于交互式生成、确认并执行 `docker run` 命令：
 
 ```shell
-docker run -itd \ 
+chmod +x create_container.sh
+./create_container.sh
+```
+
+脚本启动时会显示宿主机 GPU、CPU、内存的静态容量，以及运行中容器的 GPU/CPU 绑定、内存上限和共享内存配置，不采集实时使用率。随后依次输入 GPU（可留空）、CPU 核、内存上限、SSH 端口、容器用户、密码、宿主机挂载目录、容器名和镜像。
+
+CPU 核会自动排序、去重并合并连续区间，例如 `3,2,2,1,8,7` 会统一显示并传递为 `1-3,7-8`。
+
+容器 GPU 分配优先从 Docker `DeviceRequests` 读取，并兼容旧版 `NVIDIA_VISIBLE_DEVICES` 配置。GPU UUID 会尽可能映射为编号；只指定数量或无法识别具体设备时，冲突检查会按潜在重叠处理。
+
+执行前脚本会：
+
+- 校验 GPU/CPU、端口、挂载目录、容器名和本地镜像；
+- 再次检查所选 GPU/CPU 是否与运行中容器重叠；
+- 显示脱敏后的完整命令，并在确认后创建容器；
+- 检查容器是否保持运行，启动失败时显示日志并保留停止状态的容器供排查。
+
+内存只需输入 GiB 数值，例如输入 `256` 会生成 `-m 256G`、`--memory-swap 256G`，并自动将 `--shm-size` 设置为内存的一半。SSH 宿主机端口和宿主机挂载目录必须手动输入，且挂载目录需要提前创建。
+
+密码采用隐藏输入且不会出现在命令预览或 Docker CLI 参数中，但容器管理员仍可从容器配置中查看 `NEW_PWD`，请勿复用其他系统的重要密码。
+
+也可以参考以下命令手动创建：
+
+```shell
+docker run -itd \
     --gpus '"device=0,1"' \
     --cpuset-cpus '0-15' \
     -m 256G \
