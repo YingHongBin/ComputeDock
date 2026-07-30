@@ -69,6 +69,8 @@ chmod +x create_container.sh
 
 Agent 支持两种容器运行模式：`report` 模式继续输入完整上报地址和算力资源 Token，上报地址默认为 `https://nbdataxai.com/monitor/api/v1/agent/samples`；`test` 模式直接将 JSONL 数据写入固定文件 `/opt/computedock-agent/test-samples.jsonl`，不需要地址和 Token，也不会发起 HTTP 请求。
 
+如需将 Agent 安装到已有算力容器，参阅 [ComputeDock Agent 手动安装指南](./AGENT_MANUAL_INSTALL.md)。
+
 CPU 核会自动排序、去重并合并连续区间，例如 `3,2,2,1,8,7` 会统一显示并传递为 `1-3,7-8`。
 
 容器 GPU 分配优先从 Docker `DeviceRequests` 读取，并兼容旧版 `NVIDIA_VISIBLE_DEVICES` 配置。GPU UUID 会尽可能映射为编号；只指定数量或无法识别具体设备时，冲突检查会按潜在重叠处理。
