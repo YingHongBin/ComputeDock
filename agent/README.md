@@ -22,10 +22,10 @@ python -m pip install ./agent
 
 ## 正式运行
 
-首次运行必须指定容器名称。名称会原样保存到 `/var/lib/computedock-agent/identity.json`；后续可以省略，若传入不同名称则拒绝启动。生产部署应将 `/var/lib/computedock-agent` 挂载到持久化卷。
+首次运行必须指定容器名称。名称会原样保存到 `$COMPUTEDOCK_STATE_DIR/identity.json`；后续可以省略，若传入不同名称则拒绝启动。调用方必须显式设置 `COMPUTEDOCK_STATE_DIR`，并自行决定是否持久化该目录。项目根 Docker 脚本会将它设置为 `/var/lib/computedock-agent`。
 
 ```shell
-computedock-agent run \
+COMPUTEDOCK_STATE_DIR=/var/lib/computedock-agent computedock-agent run \
     --server-url 'https://monitor.example.com/api/v1/gpu/samples' \
     --container-name 'worker-01' \
     --interval 15 \
@@ -68,13 +68,19 @@ COMPUTEDOCK_STATE_DIR
 测试模式不需要服务端地址和 Token，也不会发起 HTTP 请求。每次有效采样以一行 JSON 追加到指定文件：
 
 ```shell
-computedock-agent run \
+COMPUTEDOCK_STATE_DIR=/tmp/computedock-agent-state computedock-agent run \
     --container-name 'worker-01' \
     --interval 15 \
     --test-output /tmp/computedock-samples.jsonl
 ```
 
 文件不会被自动清空或轮转。没有可见 GPU 时不会写入空批次。
+
+Python Agent 不提供默认状态目录或默认测试输出路径。调用方必须通过 `COMPUTEDOCK_STATE_DIR` 指定状态目录；测试模式必须通过 `--test-output` 指定输出文件。Docker 镜像中的目录约定由项目根目录脚本负责传入。
+
+## Docker 镜像集成
+
+Docker、Supervisor、健康检查和服务启动配置统一位于项目根目录；本目录只维护 Agent Python 包及其测试。集成和运行说明请参阅项目根目录的 `README.md`。
 
 ## 开发测试
 

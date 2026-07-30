@@ -4,6 +4,15 @@
 
 GPU 数据上报 Agent 已独立放在 [`agent/`](agent/) 目录，安装和运行方式见 [`agent/README.md`](agent/README.md)。
 
+Docker 运行集成文件统一位于项目根目录：
+
+- `supervisord.conf`：管理 SSH 和 Agent 服务；
+- `run_agent_service.sh`：保持 Agent 持久运行并处理异常重启；
+- `healthcheck.sh`：检查 SSH、Supervisor 服务状态和 Agent 实际进程；
+- `init_container.sh`：校验容器配置并启动 Supervisor。
+
+`agent/` 目录只包含 Agent Python 实现、依赖约束和单元测试。
+
 ## 基础镜像环境介绍
 镜像构建基底：
 ```
@@ -20,7 +29,15 @@ FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
 
 - 系统工具（sudo/wget/curl/vim/git/openssh-server/openssh-client/tmux），apt安装，apt已换源ZJU mirror
 
+- GPU 数据上报 Agent，使用 Ubuntu 系统 Python 的独立 venv，不依赖用户 Conda 环境
+
+- Supervisor 作为容器 PID 1，同时管理 SSH 和 Agent 服务
+
 ## 容器构建
+
+```shell
+docker build -t dilab-base:cuda-12.8-v3 .
+```
 
 - 使用--gpus参数指定容器使用的具体GPU卡
 
@@ -48,7 +65,9 @@ chmod +x create_container.sh
 ./create_container.sh
 ```
 
-脚本启动时会显示宿主机 GPU、CPU、内存的静态容量，以及运行中容器的 GPU/CPU 绑定、内存上限和共享内存配置，不采集实时使用率。随后依次输入 GPU（可留空）、CPU 核、内存上限、SSH 端口、容器用户、密码、宿主机挂载目录、容器名和镜像。
+脚本启动时会显示宿主机 GPU、CPU、内存的静态容量，以及运行中容器的 GPU/CPU 绑定、内存上限和共享内存配置，不采集实时使用率。随后依次输入 GPU（可留空）、CPU 核、内存上限、SSH 端口、容器用户、密码、宿主机挂载目录、容器名、镜像、Agent 运行模式和采集间隔。Agent 名称自动使用 Docker 容器名。
+
+Agent 支持两种容器运行模式：`report` 模式继续输入完整上报地址和算力资源 Token；`test` 模式直接将 JSONL 数据写入固定文件 `/opt/computedock-agent/test-samples.jsonl`，不需要地址和 Token，也不会发起 HTTP 请求。
 
 CPU 核会自动排序、去重并合并连续区间，例如 `3,2,2,1,8,7` 会统一显示并传递为 `1-3,7-8`。
 
@@ -59,11 +78,11 @@ CPU 核会自动排序、去重并合并连续区间，例如 `3,2,2,1,8,7` 会�
 - 校验 GPU/CPU、端口、挂载目录、容器名和本地镜像；
 - 再次检查所选 GPU/CPU 是否与运行中容器重叠；
 - 显示脱敏后的完整命令，并在确认后创建容器；
-- 检查容器是否保持运行，启动失败时显示日志并保留停止状态的容器供排查。
+- 检查容器是否保持运行，并等待 SSH 和 Agent 都进入健康状态；失败时显示 Supervisor 状态和容器日志，并保留容器供排查。
 
 内存只需输入 GiB 数值，例如输入 `256` 会生成 `-m 256G`、`--memory-swap 256G`，并自动将 `--shm-size` 设置为内存的一半。SSH 宿主机端口和宿主机挂载目录必须手动输入，且挂载目录需要提前创建。
 
-密码采用隐藏输入且不会出现在命令预览或 Docker CLI 参数中，但容器管理员仍可从容器配置中查看 `NEW_PWD`，请勿复用其他系统的重要密码。
+密码和 Agent Token 采用隐藏输入且不会出现在命令预览或 Docker CLI 参数值中，但容器管理员仍可从容器配置中查看 `NEW_PWD` 和 `COMPUTEDOCK_TOKEN`，请勿复用其他系统的重要密码或 Token。
 
 也可以参考以下命令手动创建：
 
@@ -78,10 +97,55 @@ docker run -itd \
     -p 52236:22 \
     -e NEW_USER="hongbin" \
     -e NEW_PWD="hongbinpwd" \
+    -e COMPUTEDOCK_SERVER_URL="https://monitor.example.com/api/v1/gpu/samples" \
+    -e COMPUTEDOCK_CONTAINER_NAME="hongbin" \
+    -e COMPUTEDOCK_INTERVAL="15" \
+    -e COMPUTEDOCK_TOKEN="resource-token" \
+    -e COMPUTEDOCK_STATE_DIR="/var/lib/computedock-agent" \
     -v /data/hongbin:/home/hongbin \
     --name hongbin \
-    dilab-base:cuda-12.8-v3 /bin/bash
+    dilab-base:cuda-12.8-v3
 ```
+
+容器内的 Supervisor 会在 Agent 异常退出后等待 5 秒并持续重启。配置错误不会无限重启；Agent、SSH 或实际 Agent 子进程缺失时，Docker 健康状态会变为 `unhealthy`。镜像不设置 Docker 自动重启策略，Supervisor 或整个容器退出后需要管理员自行恢复。
+
+Agent 配置来自容器创建时的环境变量，修改上报地址、Token 或采集间隔需要重建容器。
+
+### 在 Docker 镜像中使用 Agent 测试模式
+
+将 `COMPUTEDOCK_TEST_OUTPUT` 设置为任意非空值后，容器服务脚本会使用 `--test-output /opt/computedock-agent/test-samples.jsonl` 启动 Agent。该变量仅作为 Docker 启动开关，不属于 Python Agent 的默认配置。测试模式无需设置 `COMPUTEDOCK_SERVER_URL` 和 `COMPUTEDOCK_TOKEN`：
+
+```shell
+docker run -itd \
+    --gpus '"device=0"' \
+    -p 52236:22 \
+    -e NEW_USER="hongbin" \
+    -e NEW_PWD="hongbinpwd" \
+    -e COMPUTEDOCK_CONTAINER_NAME="agent-test-01" \
+    -e COMPUTEDOCK_INTERVAL="15" \
+    -e COMPUTEDOCK_TEST_OUTPUT="1" \
+    --name agent-test-01 \
+    dilab-base:cuda-12.8-v3
+```
+
+查看持续追加的测试数据：
+
+```shell
+docker exec agent-test-01 \
+    tail -f /opt/computedock-agent/test-samples.jsonl
+```
+
+测试文件默认位于容器可写层，容器重启后仍然存在，删除容器时会一并删除。如需在删除容器前保留数据，可使用 `docker cp` 导出该文件。
+
+## 开发测试
+
+在项目根目录执行 Docker 集成测试：
+
+```shell
+python -m unittest discover -s tests -v
+```
+
+Agent 包测试仍在 `agent/` 目录内执行，具体命令见 `agent/README.md`。
 
 # 潜在问题
 

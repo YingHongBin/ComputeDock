@@ -4,12 +4,17 @@ set -u
 set -o pipefail
 
 readonly IMAGE_DEFAULT="dilab-base:cuda-12.8-v3"
+readonly AGENT_TEST_OUTPUT_PATH="/opt/computedock-agent/test-samples.jsonl"
 
 password=""
+agent_token=""
 GPU_DATA=""
 ONLINE_CPU_SPEC=""
 ONLINE_CPU_CSV=""
 HOST_MEM_TOTAL_KIB=""
+AGENT_SERVER_URL=""
+AGENT_INTERVAL=""
+AGENT_MODE="report"
 
 info() {
     printf '[INFO] %s\n' "$*"
@@ -26,7 +31,9 @@ die() {
 
 cleanup() {
     password=""
+    agent_token=""
     unset NEW_PWD 2>/dev/null || true
+    unset COMPUTEDOCK_TOKEN 2>/dev/null || true
 }
 
 handle_interrupt() {
@@ -384,6 +391,71 @@ prompt_image() {
     done
 }
 
+prompt_agent_server_url() {
+    local value
+    while true; do
+        printf 'Agent 完整上报地址: '
+        IFS= read -r value || exit 1
+        if [[ -n "$value" ]]; then
+            AGENT_SERVER_URL="$value"
+            return
+        fi
+        warn "Agent 上报地址不能为空。"
+    done
+}
+
+prompt_agent_mode() {
+    local value
+    while true; do
+        printf 'Agent 运行模式（report=远程上报，test=写入本地文件）[report]: '
+        IFS= read -r value || exit 1
+        [[ -n "$value" ]] || value="report"
+        case "$value" in
+            report|test)
+                AGENT_MODE="$value"
+                return
+                ;;
+            *)
+                warn "Agent 运行模式只能是 report 或 test。"
+                ;;
+        esac
+    done
+}
+
+prompt_agent_interval() {
+    local value
+    while true; do
+        printf 'Agent 采集间隔（秒）[15]: '
+        IFS= read -r value || exit 1
+        [[ -n "$value" ]] || value="15"
+        if [[ ! "$value" =~ ^[0-9]+$ ]] || (( ${#value} > 4 )); then
+            warn "采集间隔必须是 5 到 3600 之间的整数。"
+            continue
+        fi
+        value=$((10#$value))
+        if (( value < 5 || value > 3600 )); then
+            warn "采集间隔必须是 5 到 3600 之间的整数。"
+            continue
+        fi
+        AGENT_INTERVAL="$value"
+        return
+    done
+}
+
+prompt_agent_token() {
+    local value
+    while true; do
+        printf '算力资源 Token: '
+        IFS= read -r -s value || exit 1
+        printf '\n'
+        if [[ -n "$value" ]]; then
+            agent_token="$value"
+            return
+        fi
+        warn "算力资源 Token 不能为空。"
+    done
+}
+
 prompt_mount_path() {
     local value
     while true; do
@@ -604,7 +676,11 @@ check_resource_conflicts() {
 
 print_command_preview() {
     local argument
-    printf '\n将执行以下命令（密码已脱敏）：\nNEW_PWD=****** '
+    if [[ "$AGENT_MODE" == "report" ]]; then
+        printf '\n将执行以下命令（密码和 Token 已脱敏）：\nNEW_PWD=****** COMPUTEDOCK_TOKEN=****** '
+    else
+        printf '\n将执行以下命令（密码已脱敏）：\nNEW_PWD=****** '
+    fi
     for argument in "${DOCKER_COMMAND[@]}"; do
         printf '%q ' "$argument"
     done
@@ -622,6 +698,15 @@ show_configuration() {
     printf '共享内存: %sM\n' "$SHM_MIB"
     printf 'SSH 端口: %s -> 22\n' "$SSH_PORT"
     printf '挂载: %s -> /home/%s\n' "$MOUNT_PATH" "$USERNAME_VALUE"
+    printf 'Agent 名称: %s\n' "$CONTAINER_NAME"
+    printf 'Agent 运行模式: %s\n' "$AGENT_MODE"
+    printf 'Agent 采集间隔: %s 秒\n' "$AGENT_INTERVAL"
+    if [[ "$AGENT_MODE" == "report" ]]; then
+        printf 'Agent 上报地址: %s\n' "$AGENT_SERVER_URL"
+        printf '%s\n' 'Agent Token: ******'
+    else
+        printf 'Agent 测试输出: %s\n' "$AGENT_TEST_OUTPUT_PATH"
+    fi
     printf '%s\n' "=============================="
 }
 
@@ -639,28 +724,73 @@ build_docker_command() {
         -p "${SSH_PORT}:22"
         -e "NEW_USER=${USERNAME_VALUE}"
         -e NEW_PWD
+        -e "COMPUTEDOCK_CONTAINER_NAME=${CONTAINER_NAME}"
+        -e "COMPUTEDOCK_INTERVAL=${AGENT_INTERVAL}"
+        -e "COMPUTEDOCK_STATE_DIR=/var/lib/computedock-agent"
+    )
+    if [[ "$AGENT_MODE" == "report" ]]; then
+        DOCKER_COMMAND+=(
+            -e "COMPUTEDOCK_SERVER_URL=${AGENT_SERVER_URL}"
+            -e COMPUTEDOCK_TOKEN
+        )
+    else
+        DOCKER_COMMAND+=(
+            -e "COMPUTEDOCK_TEST_OUTPUT=1"
+        )
+    fi
+    DOCKER_COMMAND+=(
         -v "${MOUNT_PATH}:/home/${USERNAME_VALUE}"
         --name "$CONTAINER_NAME"
         "$IMAGE_VALUE"
-        /bin/bash
     )
+}
+
+wait_for_container_services() {
+    local container_id="$1"
+    local deadline running
+    deadline=$((SECONDS + 10))
+
+    while (( SECONDS < deadline )); do
+        if docker exec "$container_id" \
+            /usr/local/bin/healthcheck.sh >/dev/null 2>&1; then
+            return 0
+        fi
+        running=$(docker inspect --format '{{.State.Running}}' "$container_id" 2>/dev/null || true)
+        [[ "$running" == "true" ]] || return 1
+        sleep 1
+    done
+    return 1
 }
 
 create_container() {
     local container_id running
 
-    if ! container_id=$(NEW_PWD="$password" "${DOCKER_COMMAND[@]}"); then
+    if ! container_id=$(NEW_PWD="$password" COMPUTEDOCK_TOKEN="$agent_token" "${DOCKER_COMMAND[@]}"); then
         die "docker run 执行失败。"
     fi
     password=""
+    agent_token=""
     unset NEW_PWD 2>/dev/null || true
+    unset COMPUTEDOCK_TOKEN 2>/dev/null || true
 
-    sleep 2
+    sleep 1
     running=$(docker inspect --format '{{.State.Running}}' "$container_id" 2>/dev/null || true)
     if [[ "$running" != "true" ]]; then
         warn "容器已创建，但未保持运行。启动日志如下："
         docker logs "$container_id" 2>&1 || true
         die "容器启动失败；已保留停止状态的容器 '$CONTAINER_NAME' 供排查。"
+    fi
+
+    if ! wait_for_container_services "$container_id"; then
+        warn "容器仍在运行，但 SSH 或 Agent 未在 10 秒内进入健康状态。"
+        printf '%s\n' 'Supervisor 状态：' >&2
+        docker exec "$container_id" \
+            /usr/bin/supervisorctl \
+            -c /etc/supervisor/supervisord.conf \
+            status 2>&1 || true
+        printf '%s\n' '容器日志：' >&2
+        docker logs "$container_id" 2>&1 || true
+        die "容器服务启动失败；已保留容器 '$CONTAINER_NAME' 供排查。"
     fi
 
     printf '\n容器创建成功。\n'
@@ -670,7 +800,12 @@ create_container() {
     printf '挂载: %s -> /home/%s\n' "$MOUNT_PATH" "$USERNAME_VALUE"
     printf '资源: GPU=%s, CPU=%s, 内存=%sG, 共享内存=%sM\n' \
         "${GPU_SELECTION:-不使用}" "$CPU_SELECTION" "$MEMORY_GIB" "$SHM_MIB"
-    warn "安全提示：容器管理员仍可通过容器配置查看 NEW_PWD，请勿复用其他系统的重要密码。"
+    if [[ "$AGENT_MODE" == "report" ]]; then
+        warn "安全提示：容器管理员可通过容器配置查看 NEW_PWD 和 COMPUTEDOCK_TOKEN，请勿复用重要密码。"
+    else
+        printf '测试数据: docker exec %q tail -f %q\n' \
+            "$CONTAINER_NAME" "$AGENT_TEST_OUTPUT_PATH"
+    fi
 }
 
 main() {
@@ -688,6 +823,12 @@ main() {
     prompt_mount_path
     prompt_container_name
     prompt_image
+    prompt_agent_mode
+    prompt_agent_interval
+    if [[ "$AGENT_MODE" == "report" ]]; then
+        prompt_agent_server_url
+        prompt_agent_token
+    fi
 
     show_configuration
     build_docker_command
@@ -712,4 +853,6 @@ main() {
     create_container
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

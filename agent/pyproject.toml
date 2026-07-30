@@ -18,6 +18,3 @@ computedock-agent = "computedock_agent.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.data-files]
-"share/computedock-agent" = ["examples/supervisord-computedock-agent.conf"]

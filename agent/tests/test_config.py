@@ -13,7 +13,10 @@ from computedock_agent.config import (
 class ConfigTests(unittest.TestCase):
     def parse(self, *arguments: str, environment: dict[str, str] | None = None):
         namespace = build_parser().parse_args(["run", *arguments])
-        return resolve_config(namespace, environment or {})
+        resolved_environment = {"COMPUTEDOCK_STATE_DIR": "/tmp/test-state"}
+        if environment is not None:
+            resolved_environment.update(environment)
+        return resolve_config(namespace, resolved_environment)
 
     def test_command_line_values_override_environment(self) -> None:
         config = self.parse(
@@ -63,6 +66,15 @@ class ConfigTests(unittest.TestCase):
         self.assertIsNone(config.server_url)
         self.assertIsNone(config.token)
         self.assertEqual(config.test_output, Path("/tmp/metrics.jsonl"))
+
+    def test_state_directory_must_be_provided_by_the_caller(self) -> None:
+        namespace = build_parser().parse_args(
+            ["run", "--interval", "10", "--server-url", "url", "--token", "token"]
+        )
+        with self.assertRaisesRegex(
+            ConfigurationError, "COMPUTEDOCK_STATE_DIR must be provided"
+        ):
+            resolve_config(namespace, {})
 
     def test_normal_mode_requires_url_and_token(self) -> None:
         with self.assertRaises(ConfigurationError):

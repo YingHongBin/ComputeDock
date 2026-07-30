@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 
-DEFAULT_STATE_DIR = Path("/var/lib/computedock-agent")
 MIN_INTERVAL_SECONDS = 5
 MAX_INTERVAL_SECONDS = 3600
 
@@ -67,6 +66,7 @@ def resolve_config(
         arguments.interval, env, "COMPUTEDOCK_INTERVAL"
     )
     token = _argument_or_environment(arguments.token, env, "COMPUTEDOCK_TOKEN")
+    test_output_value = arguments.test_output
 
     if interval_value is None:
         raise ConfigurationError(
@@ -82,7 +82,7 @@ def resolve_config(
             f"{MAX_INTERVAL_SECONDS} seconds"
         )
 
-    if arguments.test_output is None:
+    if test_output_value is None:
         if server_url is None:
             raise ConfigurationError(
                 "--server-url or COMPUTEDOCK_SERVER_URL must be provided"
@@ -91,7 +91,9 @@ def resolve_config(
             raise ConfigurationError("--token or COMPUTEDOCK_TOKEN must be provided")
 
     state_dir_value = env.get("COMPUTEDOCK_STATE_DIR")
-    state_dir = Path(state_dir_value) if state_dir_value is not None else DEFAULT_STATE_DIR
+    if state_dir_value is None:
+        raise ConfigurationError("COMPUTEDOCK_STATE_DIR must be provided")
+    state_dir = Path(state_dir_value)
 
     return AgentConfig(
         server_url=server_url,
@@ -99,7 +101,7 @@ def resolve_config(
         configured_container_name=container_name,
         interval=interval,
         state_dir=state_dir,
-        test_output=arguments.test_output,
+        test_output=test_output_value,
     )
 
 
