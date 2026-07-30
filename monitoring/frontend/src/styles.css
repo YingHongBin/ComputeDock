@@ -20,7 +20,7 @@ body { margin: 0; min-width: 320px; min-height: 100vh; }
 .detail-heading { margin-top: 12px; }
 .resource-card { height: 100%; border: 1px solid #e5eaf2; overflow: hidden; }
 .resource-card .ant-card-body { padding: 24px; }
-.resource-stats { margin: 28px 0 24px; }
+.resource-stats { margin: 28px 0 0; }
 .section-card { margin-bottom: 30px; }
 .selected-row > td { background: #eff6ff !important; }
 .chart-heading { margin: 30px 0 18px; }

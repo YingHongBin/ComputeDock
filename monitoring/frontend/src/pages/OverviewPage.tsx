@@ -1,5 +1,5 @@
 import { CopyOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
-import { App, Button, Card, Col, Empty, Flex, Row, Statistic, Tag, Typography } from 'antd'
+import { App, Button, Card, Col, Empty, Flex, Row, Statistic, Tag, Tooltip, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import { api, csrfHeaders, errorMessage } from '../api'
 import { useAuth } from '../auth'
@@ -102,22 +102,26 @@ export function OverviewPage() {
                     <Typography.Title level={4}>{resource.name}</Typography.Title>
                     <Typography.Text type="secondary">{resource.gpu_model}</Typography.Text>
                   </div>
-                  {resource.overallocated && <Tag color="error">超配</Tag>}
+                  <Flex align="center" gap={4}>
+                    {resource.overallocated && <Tag color="error">超配</Tag>}
+                    <Tooltip title="复制 Token">
+                      <Button
+                        type="text"
+                        icon={<CopyOutlined />}
+                        aria-label="复制 Token"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          void copyToken(resource)
+                        }}
+                      />
+                    </Tooltip>
+                  </Flex>
                 </Flex>
                 <Row gutter={12} className="resource-stats">
                   <Col span={8}><Statistic title="总卡数" value={resource.gpu_count} /></Col>
                   <Col span={8}><Statistic title="已分配" value={resource.allocated_gpu_count} valueStyle={resource.overallocated ? { color: '#dc2626' } : undefined} /></Col>
                   <Col span={8}><Statistic title="未分配" value={resource.available_gpu_count} /></Col>
                 </Row>
-                <Button
-                  icon={<CopyOutlined />}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    void copyToken(resource)
-                  }}
-                >
-                  复制 Token
-                </Button>
               </Card>
             </Col>
           ))}
