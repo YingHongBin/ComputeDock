@@ -1,7 +1,8 @@
 import axios from 'axios'
+import { apiBasePath } from './basePath'
 
 export const api = axios.create({
-  baseURL: '/api/v1',
+  baseURL: apiBasePath(),
   withCredentials: true,
   timeout: 30000,
 })
@@ -19,4 +20,3 @@ export function errorMessage(error: unknown): string {
   }
   return error instanceof Error ? error.message : '请求失败'
 }
-

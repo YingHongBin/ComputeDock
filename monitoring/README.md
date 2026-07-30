@@ -22,16 +22,24 @@
 
 3. 浏览器访问 `http://127.0.0.1:8000`，使用 `.env` 中的管理员账号登录。首次启动环境变量只负责创建管理员，后续密码以数据库为准。
 
-应用容器只监听 HTTP。正式部署时由外部 Nginx 终止 HTTPS，并将请求代理到 `monitoring` 的 8000 端口。生产环境应设置 `COOKIE_SECURE=true`：
+应用容器只监听 HTTP。正式部署时由外部 Nginx 终止 HTTPS，并将请求代理到 `monitoring` 的 8000 端口。生产环境应设置 `COOKIE_SECURE=true`。应用通过 `X-Forwarded-Prefix` 动态支持任意单级或多级子路径，无需重新构建镜像或在代码中写死部署路径：
 
 ```nginx
-location / {
-    proxy_pass http://127.0.0.1:8000;
+location = /monitor {
+    return 301 /monitor/;
+}
+
+location /monitor/ {
+    proxy_pass http://127.0.0.1:8000/;
     proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Prefix /monitor;
 }
 ```
+
+`proxy_pass` 末尾的 `/` 不能省略：它负责在转发时移除外部前缀。应用会根据请求头生成静态资源、管理 API、前端路由和 Cookie 路径。直接访问 `http://127.0.0.1:8000/` 时没有该请求头，应用仍按根路径运行。
 
 ## Agent 上报
 
@@ -39,7 +47,7 @@ location / {
 
 ```shell
 computedock-agent run \
-  --server-url 'http://monitor.example.com/api/v1/agent/samples' \
+  --server-url 'https://monitor.example.com/monitor/api/v1/agent/samples' \
   --container-name 'worker-01' \
   --interval 15 \
   --token 'cdr_xxx'

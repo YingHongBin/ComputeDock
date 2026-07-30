@@ -3,15 +3,21 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from .config import get_settings
 from .database import SessionLocal
 from .models import Admin
+from .proxy_prefix import (
+    FORWARDED_PREFIX_HEADER,
+    inject_base_href,
+    normalize_forwarded_prefix,
+    request_prefix,
+)
 from .routers import agent, auth, resources
 from .security import hash_password, utcnow
 
@@ -41,6 +47,19 @@ async def lifespan(_app: FastAPI):
 
 settings = get_settings()
 app = FastAPI(title="ComputeDock Monitor", version="1.0.0", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def forwarded_prefix_middleware(request: Request, call_next):
+    try:
+        request.state.forwarded_prefix = normalize_forwarded_prefix(
+            request.headers.get(FORWARDED_PREFIX_HEADER)
+        )
+    except ValueError:
+        return JSONResponse({"detail": "invalid X-Forwarded-Prefix"}, status_code=400)
+    return await call_next(request)
+
+
 if settings.allowed_origin_list:
     app.add_middleware(
         CORSMiddleware,
@@ -67,10 +86,17 @@ if assets_dir.is_dir():
 
 
 @app.get("/{path:path}", include_in_schema=False)
-def frontend(path: str):
+def frontend(path: str, request: Request):
     if path.startswith("api/"):
         return JSONResponse({"detail": "not found"}, status_code=404)
     index = frontend_dir / "index.html"
     if index.is_file():
-        return FileResponse(index)
+        html = inject_base_href(index.read_text(encoding="utf-8"), request_prefix(request))
+        return HTMLResponse(
+            html,
+            headers={
+                "Cache-Control": "no-cache",
+                "Vary": FORWARDED_PREFIX_HEADER,
+            },
+        )
     return JSONResponse({"message": "frontend is not built; run Vite on port 5173 for development"})
