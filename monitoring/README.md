@@ -1,6 +1,6 @@
 # ComputeDock 算力监控应用
 
-该目录是独立的 GPU 监控应用：Agent 使用算力资源 Token 向 FastAPI 上报数据，管理员通过 React 页面管理资源、移除容器并查看 GPU 显存与利用率趋势。
+该目录是独立的 GPU 监控应用：`collector` 接收 Agent 数据并写入 PostgreSQL，`app` 提供管理 API 和 React 页面。二者是独立容器，单独更新 `app` 时不会中断 Agent 上报。
 
 ## 快速启动
 
@@ -12,21 +12,31 @@
    $EDITOR .env
    ```
 
-2. 启动数据库和应用：
+2. 启动 collector、database 和 app：
 
    ```shell
    docker compose up --build -d
    docker compose ps
    curl http://127.0.0.1:8000/api/health
+   curl http://127.0.0.1:8001/api/health
    ```
 
 3. 浏览器访问 `http://127.0.0.1:8000`，使用 `.env` 中的管理员账号登录。首次启动环境变量只负责创建管理员，后续密码以数据库为准。
 
-应用容器只监听 HTTP。正式部署时由外部 Nginx 终止 HTTPS，并将请求代理到 `monitoring` 的 8000 端口。生产环境应设置 `COOKIE_SECURE=true`。应用通过 `X-Forwarded-Prefix` 动态支持任意单级或多级子路径，无需重新构建镜像或在代码中写死部署路径：
+两个应用容器都只监听 HTTP：管理页面使用宿主机 8000 端口，collector 使用宿主机 8001 端口。正式部署时由外部 Nginx 终止 HTTPS，将原有上报地址精确转发到 collector，其余请求转发到 app。生产环境应设置 `COOKIE_SECURE=true`。应用通过 `X-Forwarded-Prefix` 动态支持任意单级或多级子路径，无需重新构建镜像或在代码中写死部署路径：
 
 ```nginx
 location = /monitor {
     return 301 /monitor/;
+}
+
+location = /monitor/api/v1/agent/samples {
+    proxy_pass http://127.0.0.1:8001/api/v1/agent/samples;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Prefix /monitor;
 }
 
 location /monitor/ {
@@ -39,7 +49,24 @@ location /monitor/ {
 }
 ```
 
-`proxy_pass` 末尾的 `/` 不能省略：它负责在转发时移除外部前缀。应用会根据请求头生成静态资源、管理 API、前端路由和 Cookie 路径。直接访问 `http://127.0.0.1:8000/` 时没有该请求头，应用仍按根路径运行。
+通用 app location 中 `proxy_pass` 末尾的 `/` 不能省略：它负责在转发时移除外部前缀。上报接口的外部 URL 仍是 `/monitor/api/v1/agent/samples`，Agent 无需修改配置。应用会根据请求头生成静态资源、管理 API、前端路由和 Cookie 路径。直接访问 `http://127.0.0.1:8000/` 时没有该请求头，应用仍按根路径运行。
+
+### 独立更新 app
+
+只更新管理 API 和 Web 页面时，使用 `--no-deps` 保证 collector 和 database 不被重建：
+
+```shell
+docker compose build app
+docker compose up -d --no-deps app
+```
+
+collector 会继续通过 8001 端口接收并写入上报数据。数据库迁移由 collector 启动时执行；涉及采集接口或数据库结构的版本应先单独更新 collector，再更新 app：
+
+```shell
+docker compose build collector
+docker compose up -d --no-deps collector
+docker compose up -d --no-deps app
+```
 
 ## Agent 上报
 

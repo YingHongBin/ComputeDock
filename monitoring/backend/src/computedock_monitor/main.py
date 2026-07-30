@@ -18,7 +18,7 @@ from .proxy_prefix import (
     normalize_forwarded_prefix,
     request_prefix,
 )
-from .routers import agent, auth, resources
+from .routers import auth, resources
 from .security import hash_password, utcnow
 
 
@@ -71,7 +71,6 @@ if settings.allowed_origin_list:
 
 app.include_router(auth.router)
 app.include_router(resources.router)
-app.include_router(agent.router)
 
 
 @app.get("/api/health")

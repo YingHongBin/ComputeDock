@@ -5,12 +5,12 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from computedock_monitor.config import get_settings
+from computedock_monitor.config import get_database_settings
 from computedock_monitor.models import Base
 
 
 config = context.config
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+config.set_main_option("sqlalchemy.url", get_database_settings().database_url)
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
@@ -44,4 +44,3 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
-

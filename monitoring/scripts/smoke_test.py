@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="验证监控应用完整 API 流程")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
+    parser.add_argument("--collector-base-url", default="http://127.0.0.1:8001")
     parser.add_argument("--username", default="admin")
     parser.add_argument("--password", required=True)
     return parser.parse_args()
@@ -76,6 +77,7 @@ def sample(container_name: str, collected_at: datetime, utilization: int = 42) -
 def main() -> int:
     args = parse_args()
     client = Client(args.base_url)
+    collector = Client(args.collector_base_url)
     login = client.request(
         "POST",
         "/api/v1/auth/login",
@@ -98,14 +100,14 @@ def main() -> int:
     now = datetime.now(UTC).replace(microsecond=0) - timedelta(seconds=2)
 
     first = sample("smoke-worker-1", now)
-    accepted = client.request("POST", "/api/v1/agent/samples", first, agent_headers)
-    duplicate = client.request("POST", "/api/v1/agent/samples", first, agent_headers)
+    accepted = collector.request("POST", "/api/v1/agent/samples", first, agent_headers)
+    duplicate = collector.request("POST", "/api/v1/agent/samples", first, agent_headers)
     assert isinstance(accepted, dict) and accepted["status"] == "accepted"
     assert isinstance(duplicate, dict) and duplicate["status"] == "duplicate"
-    client.request(
+    collector.request(
         "POST", "/api/v1/agent/samples", sample("smoke-worker-1", now, 43), agent_headers, 409
     )
-    client.request(
+    collector.request(
         "POST",
         "/api/v1/agent/samples",
         sample("smoke-worker-2", now + timedelta(seconds=1), 55),
@@ -129,7 +131,7 @@ def main() -> int:
         headers=csrf_headers,
         expected=204,
     )
-    client.request(
+    collector.request(
         "POST",
         "/api/v1/agent/samples",
         sample("smoke-worker-1", now + timedelta(seconds=2), 60),
@@ -142,7 +144,7 @@ def main() -> int:
     client.request(
         "DELETE", f"/api/v1/resources/{resource_id}", headers=csrf_headers, expected=204
     )
-    client.request(
+    collector.request(
         "POST",
         "/api/v1/agent/samples",
         sample("smoke-worker-1", now + timedelta(seconds=3), 70),
@@ -155,4 +157,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -17,7 +17,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="向监控应用生成模拟 GPU 上报数据")
     parser.add_argument(
         "--server-url",
-        default="http://127.0.0.1:8000/api/v1/agent/samples",
+        default="http://127.0.0.1:8001/api/v1/agent/samples",
         help="完整的 Agent 数据上报地址",
     )
     parser.add_argument("--token", required=True, help="算力资源卡片上显示的 Token")
