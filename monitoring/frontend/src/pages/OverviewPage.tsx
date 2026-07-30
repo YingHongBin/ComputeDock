@@ -1,5 +1,5 @@
 import { CopyOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
-import { App, Button, Card, Col, Empty, Flex, Row, Space, Statistic, Tag, Typography } from 'antd'
+import { App, Button, Card, Col, Empty, Flex, Row, Statistic, Tag, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import { api, csrfHeaders, errorMessage } from '../api'
 import { useAuth } from '../auth'
@@ -65,6 +65,15 @@ export function OverviewPage() {
     })
   }
 
+  const copyToken = async (resource: ResourceCardData) => {
+    try {
+      await navigator.clipboard.writeText(resource.token)
+      message.success('Token 已复制')
+    } catch {
+      message.error('Token 复制失败')
+    }
+  }
+
   return (
     <section>
       <Flex justify="space-between" align="center" className="page-heading">
@@ -100,9 +109,15 @@ export function OverviewPage() {
                   <Col span={8}><Statistic title="已分配" value={resource.allocated_gpu_count} valueStyle={resource.overallocated ? { color: '#dc2626' } : undefined} /></Col>
                   <Col span={8}><Statistic title="未分配" value={resource.available_gpu_count} /></Col>
                 </Row>
-                <div className="token-box" onClick={(event) => event.stopPropagation()}>
-                  <Typography.Text className="token-text" copyable={{ text: resource.token, icon: <CopyOutlined /> }}>{resource.token}</Typography.Text>
-                </div>
+                <Button
+                  icon={<CopyOutlined />}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void copyToken(resource)
+                  }}
+                >
+                  复制 Token
+                </Button>
               </Card>
             </Col>
           ))}
