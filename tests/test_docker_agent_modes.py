@@ -9,6 +9,23 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class DockerAgentModeTests(unittest.TestCase):
+    def test_creation_script_uses_production_agent_url_by_default(self) -> None:
+        command = r'''
+            source create_container.sh
+            printf '%s\n' "$AGENT_SERVER_URL"
+        '''
+        result = subprocess.run(
+            ["bash", "-c", command],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.stdout.strip(),
+            "https://nbdataxai.com/monitor/api/v1/agent/samples",
+        )
+
     def build_docker_arguments(self, mode: str) -> list[str]:
         command = rf'''
             source create_container.sh

@@ -5,6 +5,7 @@ set -o pipefail
 
 readonly IMAGE_DEFAULT="dilab-base:cuda-12.8-v4"
 readonly AGENT_TEST_OUTPUT_PATH="/opt/computedock-agent/test-samples.jsonl"
+readonly AGENT_SERVER_URL_DEFAULT="https://nbdataxai.com/monitor/api/v1/agent/samples"
 
 password=""
 agent_token=""
@@ -12,7 +13,7 @@ GPU_DATA=""
 ONLINE_CPU_SPEC=""
 ONLINE_CPU_CSV=""
 HOST_MEM_TOTAL_KIB=""
-AGENT_SERVER_URL=""
+AGENT_SERVER_URL="$AGENT_SERVER_URL_DEFAULT"
 AGENT_INTERVAL=""
 AGENT_MODE="report"
 
@@ -392,15 +393,9 @@ prompt_image() {
 
 prompt_agent_server_url() {
     local value
-    while true; do
-        printf 'Agent 完整上报地址: '
-        IFS= read -r value || exit 1
-        if [[ -n "$value" ]]; then
-            AGENT_SERVER_URL="$value"
-            return
-        fi
-        warn "Agent 上报地址不能为空。"
-    done
+    printf 'Agent 完整上报地址 [%s]: ' "$AGENT_SERVER_URL_DEFAULT"
+    IFS= read -r value || exit 1
+    AGENT_SERVER_URL="${value:-$AGENT_SERVER_URL_DEFAULT}"
 }
 
 prompt_agent_mode() {

@@ -67,7 +67,7 @@ chmod +x create_container.sh
 
 脚本启动时会显示宿主机 GPU、CPU、内存的静态容量，以及运行中容器的 GPU/CPU 绑定、内存上限和共享内存配置，不采集实时使用率。随后依次输入 GPU（可留空）、CPU 核、内存上限、SSH 端口、容器用户、密码、宿主机挂载目录、容器名、镜像、Agent 运行模式和采集间隔。Agent 名称自动使用 Docker 容器名。
 
-Agent 支持两种容器运行模式：`report` 模式继续输入完整上报地址和算力资源 Token；`test` 模式直接将 JSONL 数据写入固定文件 `/opt/computedock-agent/test-samples.jsonl`，不需要地址和 Token，也不会发起 HTTP 请求。
+Agent 支持两种容器运行模式：`report` 模式继续输入完整上报地址和算力资源 Token，上报地址默认为 `https://nbdataxai.com/monitor/api/v1/agent/samples`；`test` 模式直接将 JSONL 数据写入固定文件 `/opt/computedock-agent/test-samples.jsonl`，不需要地址和 Token，也不会发起 HTTP 请求。
 
 CPU 核会自动排序、去重并合并连续区间，例如 `3,2,2,1,8,7` 会统一显示并传递为 `1-3,7-8`。
 
