@@ -68,6 +68,13 @@ export function removalMarkLines(
   ]
 }
 
+export function memoryUtilization(point: ChartPoint) {
+  if (point.memory_used === null || point.memory_total === null || point.memory_total <= 0) {
+    return null
+  }
+  return Number(((point.memory_used / point.memory_total) * 100).toFixed(2))
+}
+
 export function GpuChart({ series, removedAt, windowStart, windowEnd, bucketSeconds }: Props) {
   const completedSeries = {
     ...series,
@@ -80,30 +87,31 @@ export function GpuChart({ series, removedAt, windowStart, windowEnd, bucketSeco
     grid: { left: 64, right: 64, top: 54, bottom: 48 },
     tooltip: {
       trigger: 'axis',
-      valueFormatter: (value: number | null) => value === null ? '--' : String(value),
+      valueFormatter: (value: number | null) => value === null ? '--' : `${value}%`,
     },
-    legend: { data: ['显存使用', 'GPU 利用率'] },
+    legend: { data: ['显存使用率', 'GPU 利用率'] },
     xAxis: {
       type: 'time',
       min: windowStart,
       max: windowEnd,
       axisLabel: { formatter: (value: number) => dayjs(value).format('MM-DD HH:mm') },
     },
-    yAxis: [
-      { type: 'value', name: '显存 GiB', min: 0 },
-      { type: 'value', name: '利用率 %', min: 0, max: 100 },
-    ],
+    yAxis: {
+      type: 'value',
+      name: '使用率 %',
+      min: 0,
+      max: 100,
+    },
     series: [
       {
-        name: '显存使用',
+        name: '显存使用率',
         type: 'line',
-        yAxisIndex: 0,
         showSymbol: showSinglePoint,
         symbolSize: 7,
         connectNulls: false,
         data: completedSeries.points.map((point) => [
           point.time,
-          point.memory_used === null ? null : Number((point.memory_used / 1024).toFixed(3)),
+          memoryUtilization(point),
         ]),
         lineStyle: { width: 2, color: '#2563eb' },
         itemStyle: { color: '#2563eb' },
@@ -121,7 +129,6 @@ export function GpuChart({ series, removedAt, windowStart, windowEnd, bucketSeco
       {
         name: 'GPU 利用率',
         type: 'line',
-        yAxisIndex: 1,
         showSymbol: showSinglePoint,
         symbolSize: 7,
         connectNulls: false,

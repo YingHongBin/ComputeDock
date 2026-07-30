@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fillMissingPoints, missingAreas, removalMarkLines } from './GpuChart'
+import { fillMissingPoints, memoryUtilization, missingAreas, removalMarkLines } from './GpuChart'
 import type { GpuChartSeries } from '../types'
 
 const series: GpuChartSeries = {
@@ -38,6 +38,26 @@ describe('fillMissingPoints', () => {
     expect(points[0].utilization).toBeNull()
     expect(points[1]).toBe(actual)
     expect(points[2].utilization).toBeNull()
+  })
+})
+
+describe('memoryUtilization', () => {
+  it('calculates memory usage as a percentage', () => {
+    expect(memoryUtilization({
+      time: '2026-01-01T00:00:00Z',
+      memory_used: 6144,
+      memory_total: 24576,
+      utilization: 50,
+    })).toBe(25)
+  })
+
+  it('returns null without a valid total', () => {
+    expect(memoryUtilization({
+      time: '2026-01-01T00:00:00Z',
+      memory_used: 0,
+      memory_total: 0,
+      utilization: 0,
+    })).toBeNull()
   })
 })
 
