@@ -28,7 +28,7 @@ export function ResourceDetailPage({ resourceId }: { resourceId: string }) {
   const [resource, setResource] = useState<ResourceCardData | null>(null)
   const [containers, setContainers] = useState<ContainerSummary[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [range, setRange] = useState<ChartRange>('7d')
+  const [range, setRange] = useState<ChartRange>('1h')
   const [chart, setChart] = useState<ChartResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [chartLoading, setChartLoading] = useState(false)
