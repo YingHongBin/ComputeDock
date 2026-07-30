@@ -1,0 +1,48 @@
+services:
+  database:
+    build:
+      context: ./postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-computedock_monitor}
+      POSTGRES_USER: ${POSTGRES_USER:-computedock}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_partman_bgw
+      - -c
+      - pg_partman_bgw.dbname=${POSTGRES_DB:-computedock_monitor}
+      - -c
+      - pg_partman_bgw.role=${POSTGRES_USER:-computedock}
+      - -c
+      - pg_partman_bgw.interval=3600
+      - -c
+      - timezone=UTC
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-computedock} -d ${POSTGRES_DB:-computedock_monitor}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - monitoring-postgres:/var/lib/postgresql
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?set ADMIN_USERNAME in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set ADMIN_PASSWORD in .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+    depends_on:
+      database:
+        condition: service_healthy
+    ports:
+      - "${MONITORING_PORT:-8000}:8000"
+    restart: unless-stopped
+
+volumes:
+  monitoring-postgres:

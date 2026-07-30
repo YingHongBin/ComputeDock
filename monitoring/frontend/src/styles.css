@@ -1,0 +1,44 @@
+:root {
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #172033;
+  background: #f5f7fb;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+.full-width { width: 100%; }
+.fullscreen-spin { min-height: 100vh; display: grid; place-items: center; }
+.app-layout { min-height: 100vh; }
+.app-header { background: rgba(255,255,255,.96); border-bottom: 1px solid #e7ebf2; display: flex; align-items: center; justify-content: space-between; padding: 0 32px; position: sticky; top: 0; z-index: 20; }
+.brand-mark, .login-brand { width: 36px; height: 36px; border-radius: 11px; display: grid; place-items: center; color: white; font-weight: 800; background: linear-gradient(135deg,#2563eb,#7c3aed); box-shadow: 0 8px 20px rgba(37,99,235,.28); }
+.brand-title { margin: 0 !important; }
+.header-user { color: #475569; }
+.app-content { padding: 30px 36px 56px; max-width: 1600px; width: 100%; margin: 0 auto; }
+.page-heading { margin: 8px 0 28px; }
+.page-heading h2, .chart-heading h3 { margin-bottom: 4px; }
+.detail-heading { margin-top: 12px; }
+.resource-card { height: 100%; border: 1px solid #e5eaf2; overflow: hidden; }
+.resource-card .ant-card-body { padding: 24px; }
+.resource-stats { margin: 28px 0 24px; }
+.token-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 9px; padding: 10px 12px; overflow: hidden; }
+.token-text { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; word-break: break-all; }
+.section-card { margin-bottom: 30px; }
+.selected-row > td { background: #eff6ff !important; }
+.chart-heading { margin: 30px 0 18px; }
+.chart-container { min-height: 260px; }
+.gpu-chart-card { border: 1px solid #e7ebf2; }
+.login-page { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: radial-gradient(circle at 15% 20%, rgba(37,99,235,.14), transparent 34%), radial-gradient(circle at 85% 80%, rgba(124,58,237,.12), transparent 30%), #f8fafc; }
+.login-card { width: min(420px, 100%); padding: 22px; border: 1px solid rgba(226,232,240,.9); box-shadow: 0 28px 70px rgba(15,23,42,.12); }
+.login-card .login-brand { margin-bottom: 22px; }
+.login-card h2 { margin-bottom: 4px; }
+.login-error { margin: 20px 0; }
+
+@media (max-width: 768px) {
+  .app-header { padding: 0 16px; }
+  .brand-title, .header-user { display: none; }
+  .app-content { padding: 20px 16px 40px; }
+  .page-heading { align-items: flex-start !important; gap: 16px; flex-direction: column; }
+  .chart-heading { align-items: flex-start !important; gap: 14px; flex-direction: column; }
+}
+
