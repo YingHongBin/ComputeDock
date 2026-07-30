@@ -36,7 +36,7 @@ FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
 ## 容器构建
 
 ```shell
-docker build -t dilab-base:cuda-12.8-v3 .
+docker build -t dilab-base:cuda-12.8-v4 .
 ```
 
 - 使用--gpus参数指定容器使用的具体GPU卡
@@ -104,7 +104,7 @@ docker run -itd \
     -e COMPUTEDOCK_STATE_DIR="/var/lib/computedock-agent" \
     -v /data/hongbin:/home/hongbin \
     --name hongbin \
-    dilab-base:cuda-12.8-v3
+    dilab-base:cuda-12.8-v4
 ```
 
 容器内的 Supervisor 会在 Agent 异常退出后等待 5 秒并持续重启。配置错误不会无限重启；Agent、SSH 或实际 Agent 子进程缺失时，Docker 健康状态会变为 `unhealthy`。镜像不设置 Docker 自动重启策略，Supervisor 或整个容器退出后需要管理员自行恢复。
@@ -125,7 +125,7 @@ docker run -itd \
     -e COMPUTEDOCK_INTERVAL="15" \
     -e COMPUTEDOCK_TEST_OUTPUT="1" \
     --name agent-test-01 \
-    dilab-base:cuda-12.8-v3
+    dilab-base:cuda-12.8-v4
 ```
 
 查看持续追加的测试数据：

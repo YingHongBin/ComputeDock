@@ -3,7 +3,7 @@
 set -u
 set -o pipefail
 
-readonly IMAGE_DEFAULT="dilab-base:cuda-12.8-v3"
+readonly IMAGE_DEFAULT="dilab-base:cuda-12.8-v4"
 readonly AGENT_TEST_OUTPUT_PATH="/opt/computedock-agent/test-samples.jsonl"
 
 password=""
