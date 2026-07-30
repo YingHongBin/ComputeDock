@@ -76,6 +76,26 @@ class DockerAgentModeTests(unittest.TestCase):
         )
         self.assertIn('agent_arguments+=(--test-output "$TEST_OUTPUT_PATH")', service_script)
 
+    def test_command_preview_displays_plaintext_password_and_token(self) -> None:
+        command = r'''
+            source create_container.sh
+            password="plain-password"
+            agent_token="plain-token"
+            AGENT_MODE="report"
+            DOCKER_COMMAND=(docker run example:image)
+            print_command_preview
+        '''
+        result = subprocess.run(
+            ["bash", "-c", command],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertIn("NEW_PWD=plain-password", result.stdout)
+        self.assertIn("COMPUTEDOCK_TOKEN=plain-token", result.stdout)
+        self.assertNotIn("******", result.stdout)
+
     def test_shell_scripts_pass_syntax_check(self) -> None:
         scripts = [
             PROJECT_ROOT / "create_container.sh",

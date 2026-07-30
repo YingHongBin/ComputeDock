@@ -339,10 +339,9 @@ prompt_password() {
     local first second
     while true; do
         printf '容器用户密码: '
-        IFS= read -r -s first || exit 1
-        printf '\n再次输入密码: '
-        IFS= read -r -s second || exit 1
-        printf '\n'
+        IFS= read -r first || exit 1
+        printf '再次输入密码: '
+        IFS= read -r second || exit 1
         if [[ -z "$first" ]]; then
             warn "密码不能为空。"
         elif [[ "$first" != "$second" ]]; then
@@ -446,8 +445,7 @@ prompt_agent_token() {
     local value
     while true; do
         printf '算力资源 Token: '
-        IFS= read -r -s value || exit 1
-        printf '\n'
+        IFS= read -r value || exit 1
         if [[ -n "$value" ]]; then
             agent_token="$value"
             return
@@ -676,10 +674,10 @@ check_resource_conflicts() {
 
 print_command_preview() {
     local argument
+    printf '\n将执行以下命令：\n'
+    printf 'NEW_PWD=%q ' "$password"
     if [[ "$AGENT_MODE" == "report" ]]; then
-        printf '\n将执行以下命令（密码和 Token 已脱敏）：\nNEW_PWD=****** COMPUTEDOCK_TOKEN=****** '
-    else
-        printf '\n将执行以下命令（密码已脱敏）：\nNEW_PWD=****** '
+        printf 'COMPUTEDOCK_TOKEN=%q ' "$agent_token"
     fi
     for argument in "${DOCKER_COMMAND[@]}"; do
         printf '%q ' "$argument"
@@ -692,6 +690,7 @@ show_configuration() {
     printf '\n容器名称: %s\n' "$CONTAINER_NAME"
     printf '镜像: %s\n' "$IMAGE_VALUE"
     printf '用户: %s\n' "$USERNAME_VALUE"
+    printf '用户密码: %s\n' "$password"
     printf 'GPU: %s\n' "${GPU_SELECTION:-不使用}"
     printf 'CPU 核: %s\n' "$CPU_SELECTION"
     printf '内存: %sG\n' "$MEMORY_GIB"
@@ -703,7 +702,7 @@ show_configuration() {
     printf 'Agent 采集间隔: %s 秒\n' "$AGENT_INTERVAL"
     if [[ "$AGENT_MODE" == "report" ]]; then
         printf 'Agent 上报地址: %s\n' "$AGENT_SERVER_URL"
-        printf '%s\n' 'Agent Token: ******'
+        printf 'Agent Token: %s\n' "$agent_token"
     else
         printf 'Agent 测试输出: %s\n' "$AGENT_TEST_OUTPUT_PATH"
     fi
