@@ -120,17 +120,24 @@ Agent 不校验上报地址的格式。每次请求超时为 10 秒。采集失�
 
 普通 Docker 容器通常不以 systemd 作为 PID 1，因此容器内建议使用 Supervisor 管理 Agent。
 
-对于 PID 1 为 `sshd` 的旧容器，可以在宿主机的 ComputeDock 项目根目录执行自动安装脚本：
+对于 PID 1 为 `sshd` 的旧容器，先在 ComputeDock 项目根目录将 Agent 目录复制到容器：
 
 ```bash
-./install_agent_service.sh \
-  --container worker-01 \
+docker cp ./agent worker-01:/tmp/computedock-agent
+docker exec -it --user root worker-01 bash
+```
+
+然后在目标容器内执行：
+
+```bash
+chmod +x /tmp/computedock-agent/install_agent_service.sh
+/tmp/computedock-agent/install_agent_service.sh \
   --name worker-01 \
   --interval 15 \
   --token '<resource-token>'
 ```
 
-脚本会自动复制 `agent/` 源码、创建独立 venv、安装 Supervisor、写入服务配置并启动 Agent。如果不传 `--name`，Agent 名称默认使用 Docker 容器名。默认上报地址为 `https://nbdataxai.com/monitor/api/v1/agent/samples`。
+脚本会在当前容器内创建独立 venv、安装 Supervisor、写入服务配置并启动 Agent。`--name` 必须由用户显式指定。默认从脚本所在目录安装 Python 包；可以使用 `--agent-source` 指定其他路径。默认上报地址为 `https://nbdataxai.com/monitor/api/v1/agent/samples`。
 
 如需手动完成同样的配置，继续按以下步骤操作。
 

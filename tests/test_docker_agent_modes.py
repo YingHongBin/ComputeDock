@@ -94,7 +94,7 @@ class DockerAgentModeTests(unittest.TestCase):
         self.assertIn('agent_arguments+=(--test-output "$TEST_OUTPUT_PATH")', service_script)
 
     def test_legacy_container_installer_configures_supervisor_restart(self) -> None:
-        installer = (PROJECT_ROOT / "install_agent_service.sh").read_text(
+        installer = (PROJECT_ROOT / "agent" / "install_agent_service.sh").read_text(
             encoding="utf-8"
         )
         self.assertIn(
@@ -104,6 +104,9 @@ class DockerAgentModeTests(unittest.TestCase):
         self.assertIn("autorestart=unexpected", installer)
         self.assertIn("exitcodes=0,2", installer)
         self.assertIn("supervisord -c /etc/supervisor/supervisord.conf", installer)
+        self.assertIn("必须在目标算力容器内以 root 用户执行", installer)
+        self.assertNotIn("docker exec", installer)
+        self.assertNotIn("docker cp", installer)
 
     def test_command_preview_displays_plaintext_password_and_token(self) -> None:
         command = r'''
@@ -131,7 +134,7 @@ class DockerAgentModeTests(unittest.TestCase):
             PROJECT_ROOT / "init_container.sh",
             PROJECT_ROOT / "run_agent_service.sh",
             PROJECT_ROOT / "healthcheck.sh",
-            PROJECT_ROOT / "install_agent_service.sh",
+            PROJECT_ROOT / "agent" / "install_agent_service.sh",
         ]
         subprocess.run(
             ["bash", "-n", *(str(script) for script in scripts)],
