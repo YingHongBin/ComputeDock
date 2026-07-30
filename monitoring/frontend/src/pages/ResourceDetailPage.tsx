@@ -122,7 +122,18 @@ export function ResourceDetailPage({ resourceId }: { resourceId: string }) {
   }
 
   const columns = useMemo<ColumnsType<ContainerSummary>>(() => [
-    { title: '容器名称', dataIndex: 'name', fixed: 'left', render: (name, row) => <Space><Typography.Text strong>{name}</Typography.Text>{row.generation > 1 && <Tag>第 {row.generation} 代</Tag>}</Space> },
+    {
+      title: '容器名称',
+      dataIndex: 'name',
+      fixed: 'left',
+      width: 140,
+      render: (name, row) => (
+        <div className="container-name-cell">
+          <Typography.Text strong>{name}</Typography.Text>
+          {row.generation > 1 && <Tag>第 {row.generation} 代</Tag>}
+        </div>
+      ),
+    },
     { title: '状态', dataIndex: 'status', width: 90, render: (status) => status === 'online' ? <Tag color="success">在线</Tag> : <Tag>失联</Tag> },
     { title: '最后上报', dataIndex: 'last_received_at', width: 170, render: (value) => dayjs(value).format('YYYY-MM-DD HH:mm:ss') },
     { title: '分配显卡', dataIndex: 'allocated_gpu_count', width: 100 },
@@ -166,7 +177,7 @@ export function ResourceDetailPage({ resourceId }: { resourceId: string }) {
           columns={columns}
           dataSource={containers}
           pagination={false}
-          scroll={{ x: 1100 }}
+          scroll={{ x: 980 }}
           rowClassName={(row) => row.id === selectedId ? 'selected-row' : ''}
           onRow={(row) => ({ onClick: () => setSelectedId(row.id) })}
         />
