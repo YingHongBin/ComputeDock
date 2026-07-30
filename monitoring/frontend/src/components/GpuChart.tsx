@@ -84,17 +84,17 @@ export function GpuChart({ series, removedAt, windowStart, windowEnd, bucketSeco
   const markLines = removalMarkLines(removedAt, windowStart, windowEnd)
   const option = {
     animation: false,
-    grid: { left: 64, right: 64, top: 54, bottom: 48 },
+    grid: { left: 32, right: 32, top: 76, bottom: 32, containLabel: true },
     tooltip: {
       trigger: 'axis',
       valueFormatter: (value: number | null) => value === null ? '--' : `${value}%`,
     },
-    legend: { data: ['显存使用率', 'GPU 利用率'] },
+    legend: { top: 8, data: ['显存使用率', 'GPU 利用率'] },
     xAxis: {
       type: 'time',
       min: windowStart,
       max: windowEnd,
-      axisLabel: { formatter: (value: number) => dayjs(value).format('MM-DD HH:mm') },
+      axisLabel: { margin: 14, formatter: (value: number) => dayjs(value).format('MM-DD HH:mm') },
     },
     yAxis: {
       type: 'value',
