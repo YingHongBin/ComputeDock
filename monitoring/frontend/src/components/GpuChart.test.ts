@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { missingAreas } from './GpuChart'
+import { fillMissingPoints, missingAreas, removalMarkLines } from './GpuChart'
 import type { GpuChartSeries } from '../types'
 
 const series: GpuChartSeries = {
@@ -24,3 +24,41 @@ describe('missingAreas', () => {
   })
 })
 
+describe('fillMissingPoints', () => {
+  it('fills absent buckets with null and preserves actual database points', () => {
+    const actual = series.points[1]
+    const points = fillMissingPoints(
+      [actual],
+      '2026-01-01T00:00:00Z',
+      '2026-01-01T00:03:00Z',
+      60,
+    )
+
+    expect(points).toHaveLength(3)
+    expect(points[0].utilization).toBeNull()
+    expect(points[1]).toBe(actual)
+    expect(points[2].utilization).toBeNull()
+  })
+})
+
+describe('removalMarkLines', () => {
+  it('shows the removal marker inside the selected window', () => {
+    const removedAt = '2026-01-01T00:30:00Z'
+    const lines = removalMarkLines(
+      removedAt,
+      '2026-01-01T00:00:00Z',
+      '2026-01-01T01:00:00Z',
+    )
+
+    expect(lines).toHaveLength(1)
+    expect(lines[0].xAxis).toBe(removedAt)
+  })
+
+  it('does not create a marker without a removal time', () => {
+    expect(removalMarkLines(
+      null,
+      '2026-01-01T00:00:00Z',
+      '2026-01-01T01:00:00Z',
+    )).toEqual([])
+  })
+})

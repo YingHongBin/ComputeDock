@@ -193,7 +193,16 @@ export function ResourceDetailPage({ resourceId }: { resourceId: string }) {
         <Card loading={chartLoading} className="chart-container">
           {chart && chart.series.length ? (
             <Space direction="vertical" size="large" className="full-width">
-              {chart.series.map((item) => <GpuChart key={item.gpuid} series={item} removedAt={chart.instance_removed_at} />)}
+              {chart.series.map((item) => (
+                <GpuChart
+                  key={item.gpuid}
+                  series={item}
+                  removedAt={chart.instance_removed_at}
+                  windowStart={chart.window_start}
+                  windowEnd={chart.window_end}
+                  bucketSeconds={chart.bucket_seconds}
+                />
+              ))}
             </Space>
           ) : !chartLoading && <Empty description="当前范围没有 GPU 数据" />}
         </Card>

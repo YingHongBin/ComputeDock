@@ -131,6 +131,8 @@ class ChartResponse(BaseModel):
     container_name: str
     range: Literal["1h", "6h", "1d", "7d"]
     bucket_seconds: int
+    window_start: datetime
+    window_end: datetime
     instance_first_reported_at: datetime
     instance_removed_at: datetime | None
     series: list[GpuChartSeries]

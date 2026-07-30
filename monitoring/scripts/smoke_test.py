@@ -121,9 +121,12 @@ def main() -> int:
     worker_1 = next(item for item in containers if item["name"] == "smoke-worker-1")
     chart = client.request(
         "GET",
-        f"/api/v1/resources/{resource_id}/containers/{worker_1['id']}/chart?range=1h",
+        f"/api/v1/resources/{resource_id}/containers/{worker_1['id']}/chart?range=7d",
     )
-    assert isinstance(chart, dict) and chart["series"][0]["shared"] is True
+    assert isinstance(chart, dict)
+    assert chart["window_start"] < chart["window_end"]
+    assert chart["series"][0]["shared"] is True
+    assert len(chart["series"][0]["points"]) == 1
 
     client.request(
         "DELETE",

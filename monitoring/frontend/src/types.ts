@@ -54,10 +54,11 @@ export interface ChartResponse {
   container_name: string
   range: ChartRange
   bucket_seconds: number
+  window_start: string
+  window_end: string
   instance_first_reported_at: string
   instance_removed_at: string | null
   series: GpuChartSeries[]
 }
 
 export type ChartRange = '1h' | '6h' | '1d' | '7d'
-

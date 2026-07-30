@@ -342,33 +342,21 @@ def chart_data(
         rows = db.execute(
             text(
                 """
-                WITH buckets AS (
-                    SELECT generate_series(
-                        :start,
-                        :end - make_interval(secs => :bucket_seconds),
-                        make_interval(secs => :bucket_seconds)
-                    ) AS bucket
-                ), aggregated AS (
-                    SELECT date_bin(
-                               make_interval(secs => :bucket_seconds),
-                               collected_at,
-                               TIMESTAMPTZ '1970-01-01 00:00:00+00'
-                           ) AS bucket,
-                           AVG(memory_used)::float AS memory_used,
-                           AVG(memory_total)::float AS memory_total,
-                           AVG(utilization)::float AS utilization
-                    FROM gpu_samples
-                    WHERE container_id = :container_id
-                      AND gpuid = :gpuid
-                      AND collected_at >= :start
-                      AND collected_at < :end
-                    GROUP BY 1
-                )
-                SELECT buckets.bucket, aggregated.memory_used,
-                       aggregated.memory_total, aggregated.utilization
-                FROM buckets
-                LEFT JOIN aggregated USING (bucket)
-                ORDER BY buckets.bucket
+                SELECT date_bin(
+                           make_interval(secs => :bucket_seconds),
+                           collected_at,
+                           TIMESTAMPTZ '1970-01-01 00:00:00+00'
+                       ) AS bucket,
+                       AVG(memory_used)::float AS memory_used,
+                       AVG(memory_total)::float AS memory_total,
+                       AVG(utilization)::float AS utilization
+                FROM gpu_samples
+                WHERE container_id = :container_id
+                  AND gpuid = :gpuid
+                  AND collected_at >= :start
+                  AND collected_at < :end
+                GROUP BY 1
+                ORDER BY 1
                 """
             ),
             {
@@ -402,6 +390,8 @@ def chart_data(
         container_name=container.name,
         range=range_name,  # type: ignore[arg-type]
         bucket_seconds=bucket_seconds,
+        window_start=start,
+        window_end=end,
         instance_first_reported_at=container.first_reported_at,
         instance_removed_at=container.removed_at,
         series=series,

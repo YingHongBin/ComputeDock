@@ -1,14 +1,38 @@
-import { Alert, Card, Empty, Space, Tag, Typography } from 'antd'
+import { Alert, Card, Space, Tag, Typography } from 'antd'
 import ReactECharts from 'echarts-for-react'
 import dayjs from 'dayjs'
-import type { GpuChartSeries } from '../types'
+import type { ChartPoint, GpuChartSeries } from '../types'
 
 interface Props {
   series: GpuChartSeries
   removedAt: string | null
+  windowStart: string
+  windowEnd: string
+  bucketSeconds: number
 }
 
-export function missingAreas(series: GpuChartSeries, removedAt: string | null) {
+export function fillMissingPoints(
+  points: ChartPoint[],
+  windowStart: string,
+  windowEnd: string,
+  bucketSeconds: number,
+) {
+  const existing = new Map(points.map((point) => [dayjs(point.time).valueOf(), point]))
+  const completed: ChartPoint[] = []
+  const end = dayjs(windowEnd).valueOf()
+  const step = bucketSeconds * 1000
+  for (let cursor = dayjs(windowStart).valueOf(); cursor < end; cursor += step) {
+    completed.push(existing.get(cursor) ?? {
+      time: new Date(cursor).toISOString(),
+      memory_used: null,
+      memory_total: null,
+      utilization: null,
+    })
+  }
+  return completed
+}
+
+export function missingAreas(series: GpuChartSeries, removedAt: string | null, windowEnd?: string) {
   const areas: Array<Array<{ xAxis: string }>> = []
   let start: string | null = null
   for (const point of series.points) {
@@ -22,13 +46,35 @@ export function missingAreas(series: GpuChartSeries, removedAt: string | null) {
     }
   }
   if (start !== null && series.points.length) {
-    areas.push([{ xAxis: start }, { xAxis: series.points.at(-1)!.time }])
+    areas.push([{ xAxis: start }, { xAxis: windowEnd ?? series.points.at(-1)!.time }])
   }
   return areas
 }
 
-export function GpuChart({ series, removedAt }: Props) {
-  if (!series.points.length) return <Empty description="当前范围没有数据" />
+function insideWindow(time: string, windowStart: string, windowEnd: string) {
+  const value = dayjs(time).valueOf()
+  return value >= dayjs(windowStart).valueOf() && value < dayjs(windowEnd).valueOf()
+}
+
+export function removalMarkLines(
+  removedAt: string | null,
+  windowStart: string,
+  windowEnd: string,
+) {
+  return [
+    ...(removedAt && insideWindow(removedAt, windowStart, windowEnd)
+      ? [{ xAxis: removedAt, label: { formatter: '已移除' }, lineStyle: { color: '#64748b' } }]
+      : []),
+  ]
+}
+
+export function GpuChart({ series, removedAt, windowStart, windowEnd, bucketSeconds }: Props) {
+  const completedSeries = {
+    ...series,
+    points: fillMissingPoints(series.points, windowStart, windowEnd, bucketSeconds),
+  }
+  const showSinglePoint = series.points.length === 1
+  const markLines = removalMarkLines(removedAt, windowStart, windowEnd)
   const option = {
     animation: false,
     grid: { left: 64, right: 64, top: 54, bottom: 48 },
@@ -39,6 +85,8 @@ export function GpuChart({ series, removedAt }: Props) {
     legend: { data: ['显存使用', 'GPU 利用率'] },
     xAxis: {
       type: 'time',
+      min: windowStart,
+      max: windowEnd,
       axisLabel: { formatter: (value: number) => dayjs(value).format('MM-DD HH:mm') },
     },
     yAxis: [
@@ -50,9 +98,10 @@ export function GpuChart({ series, removedAt }: Props) {
         name: '显存使用',
         type: 'line',
         yAxisIndex: 0,
-        showSymbol: false,
+        showSymbol: showSinglePoint,
+        symbolSize: 7,
         connectNulls: false,
-        data: series.points.map((point) => [
+        data: completedSeries.points.map((point) => [
           point.time,
           point.memory_used === null ? null : Number((point.memory_used / 1024).toFixed(3)),
         ]),
@@ -61,24 +110,22 @@ export function GpuChart({ series, removedAt }: Props) {
         markArea: {
           silent: true,
           itemStyle: { color: 'rgba(248, 113, 113, 0.14)' },
-          data: missingAreas(series, removedAt),
+          data: missingAreas(completedSeries, removedAt, windowEnd),
         },
         markLine: {
           silent: true,
           symbol: 'none',
-          data: [
-            { xAxis: series.first_reported_at, label: { formatter: '首次上报' }, lineStyle: { color: '#16a34a' } },
-            ...(removedAt ? [{ xAxis: removedAt, label: { formatter: '已移除' }, lineStyle: { color: '#64748b' } }] : []),
-          ],
+          data: markLines,
         },
       },
       {
         name: 'GPU 利用率',
         type: 'line',
         yAxisIndex: 1,
-        showSymbol: false,
+        showSymbol: showSinglePoint,
+        symbolSize: 7,
         connectNulls: false,
-        data: series.points.map((point) => [point.time, point.utilization]),
+        data: completedSeries.points.map((point) => [point.time, point.utilization]),
         lineStyle: { width: 2, color: '#f59e0b' },
         itemStyle: { color: '#f59e0b' },
       },
