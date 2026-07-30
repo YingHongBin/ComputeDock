@@ -142,6 +142,16 @@ def main() -> int:
     assert next(item for item in regenerated if item["name"] == "smoke-worker-1")["generation"] == 2
 
     client.request(
+        "DELETE", f"/api/v1/resources/{resource_id}", headers=csrf_headers, expected=409
+    )
+    for active_container in regenerated:
+        client.request(
+            "DELETE",
+            f"/api/v1/resources/{resource_id}/containers/{active_container['id']}",
+            headers=csrf_headers,
+            expected=204,
+        )
+    client.request(
         "DELETE", f"/api/v1/resources/{resource_id}", headers=csrf_headers, expected=204
     )
     collector.request(

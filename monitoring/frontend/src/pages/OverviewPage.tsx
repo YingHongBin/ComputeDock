@@ -1,4 +1,4 @@
-import { CopyOutlined, DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
+import { CopyOutlined, PlusOutlined } from '@ant-design/icons'
 import { App, Button, Card, Col, Empty, Flex, Row, Statistic, Tag, Tooltip, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import { api, csrfHeaders, errorMessage } from '../api'
@@ -8,13 +8,12 @@ import { useNavigation } from '../routing'
 import type { ResourceCardData, ResourceInput } from '../types'
 
 export function OverviewPage() {
-  const { message, modal } = App.useApp()
+  const { message } = App.useApp()
   const { session } = useAuth()
   const { navigate } = useNavigation()
   const [resources, setResources] = useState<ResourceCardData[]>([])
   const [loading, setLoading] = useState(true)
   const [editorOpen, setEditorOpen] = useState(false)
-  const [editing, setEditing] = useState<ResourceCardData | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
   const load = async () => {
@@ -35,34 +34,14 @@ export function OverviewPage() {
     if (!session) return
     setSubmitting(true)
     try {
-      if (editing) {
-        await api.put(`/resources/${editing.id}`, value, { headers: csrfHeaders(session.csrf_token) })
-      } else {
-        await api.post('/resources', value, { headers: csrfHeaders(session.csrf_token) })
-      }
+      await api.post('/resources', value, { headers: csrfHeaders(session.csrf_token) })
       setEditorOpen(false)
-      setEditing(null)
       await load()
     } catch (error) {
       message.error(errorMessage(error))
     } finally {
       setSubmitting(false)
     }
-  }
-
-  const remove = (resource: ResourceCardData) => {
-    if (!session) return
-    modal.confirm({
-      title: `删除算力资源“${resource.name}”？`,
-      content: '删除后 Token 永久失效，页面不提供恢复入口。',
-      okText: '确认删除',
-      okButtonProps: { danger: true },
-      cancelText: '取消',
-      onOk: async () => {
-        await api.delete(`/resources/${resource.id}`, { headers: csrfHeaders(session.csrf_token) })
-        await load()
-      },
-    })
   }
 
   const copyToken = async (resource: ResourceCardData) => {
@@ -81,7 +60,7 @@ export function OverviewPage() {
           <Typography.Title level={2}>算力资源</Typography.Title>
           <Typography.Text type="secondary">查看 GPU 容量与当前分配情况</Typography.Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditing(null); setEditorOpen(true) }}>新建算力资源</Button>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditorOpen(true)}>新建算力资源</Button>
       </Flex>
       {!loading && resources.length === 0 ? <Empty description="尚未创建算力资源" /> : (
         <Row gutter={[20, 20]}>
@@ -92,10 +71,6 @@ export function OverviewPage() {
                 hoverable
                 className="resource-card"
                 onClick={() => navigate(`/resources/${resource.id}`)}
-                actions={[
-                  <EditOutlined key="edit" onClick={(event) => { event.stopPropagation(); setEditing(resource); setEditorOpen(true) }} />,
-                  <DeleteOutlined key="delete" onClick={(event) => { event.stopPropagation(); remove(resource) }} />,
-                ]}
               >
                 <Flex justify="space-between" align="start">
                   <div>
@@ -129,9 +104,8 @@ export function OverviewPage() {
       )}
       <ResourceEditor
         open={editorOpen}
-        resource={editing}
         submitting={submitting}
-        onCancel={() => { setEditorOpen(false); setEditing(null) }}
+        onCancel={() => setEditorOpen(false)}
         onSubmit={save}
       />
     </section>

@@ -94,6 +94,13 @@ def authenticate_resource(db: Session, token: str) -> ComputeResource:
     return resource
 
 
+def lock_resource_lifecycle(db: Session, resource_id: uuid.UUID) -> None:
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:resource_id))"),
+        {"resource_id": str(resource_id)},
+    )
+
+
 def get_or_create_container(
     db: Session,
     resource: ComputeResource,
@@ -141,6 +148,10 @@ def ingest_sample(
     received_at = utcnow()
     collected_at = validate_collection_time(payload.collected_at, received_at)
     payload = payload.model_copy(update={"collected_at": collected_at})
+    lock_resource_lifecycle(db, resource.id)
+    db.refresh(resource)
+    if resource.archived_at is not None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid resource token")
     container = get_or_create_container(
         db, resource, payload.container_name, collected_at, received_at
     )

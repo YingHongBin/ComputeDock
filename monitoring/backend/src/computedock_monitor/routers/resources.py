@@ -19,7 +19,7 @@ from ..schemas import (
     ResourceInput,
 )
 from ..security import digest_secret, make_resource_token, utcnow
-from ..services import chart_data, container_summaries, resource_card
+from ..services import chart_data, container_summaries, lock_resource_lifecycle, resource_card
 
 router = APIRouter(prefix="/api/v1/resources", tags=["resources"])
 
@@ -136,6 +136,23 @@ def archive_resource(
     db: Session = Depends(get_db),
 ) -> Response:
     resource = active_resource(db, resource_id)
+    lock_resource_lifecycle(db, resource.id)
+    db.refresh(resource)
+    if resource.archived_at is not None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "resource not found")
+    active_container_id = db.scalar(
+        select(ContainerInstance.id)
+        .where(
+            ContainerInstance.resource_id == resource.id,
+            ContainerInstance.removed_at.is_(None),
+        )
+        .limit(1)
+    )
+    if active_container_id is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "resource has active containers",
+        )
     resource.archived_at = utcnow()
     resource.updated_at = resource.archived_at
     db.commit()
