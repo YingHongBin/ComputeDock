@@ -29,8 +29,14 @@ class GpuMetric:
 
 
 class NvmlCollector:
-    def __init__(self, nvml: ModuleType | object | None = None) -> None:
+    def __init__(
+        self,
+        nvml: ModuleType | object | None = None,
+        *,
+        disabled: bool = False,
+    ) -> None:
         self._nvml = nvml
+        self._disabled = disabled
         self._initialized = False
 
     @property
@@ -67,6 +73,8 @@ class NvmlCollector:
             raise CollectionError("MIG-enabled GPUs are not supported")
 
     def collect(self) -> list[GpuMetric]:
+        if self._disabled:
+            return []
         try:
             self._ensure_initialized()
             metrics: list[GpuMetric] = []

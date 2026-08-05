@@ -708,6 +708,10 @@ build_docker_command() {
     DOCKER_COMMAND=(docker run -itd)
     if [[ -n "$GPU_SELECTION" ]]; then
         DOCKER_COMMAND+=(--gpus "\"device=${GPU_SELECTION}\"")
+    else
+        # CUDA base images commonly default NVIDIA_VISIBLE_DEVICES to "all".
+        # Explicitly disable the NVIDIA runtime injection for CPU-only containers.
+        DOCKER_COMMAND+=(-e "NVIDIA_VISIBLE_DEVICES=void")
     fi
     DOCKER_COMMAND+=(
         --cpuset-cpus "$CPU_SELECTION"

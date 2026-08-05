@@ -77,6 +77,14 @@ class CollectorTests(unittest.TestCase):
         collector = NvmlCollector(FakeNvml(count=0))
         self.assertEqual(collector.collect(), [])
 
+    def test_disabled_collection_does_not_initialize_nvml(self) -> None:
+        nvml = FakeNvml()
+        collector = NvmlCollector(nvml, disabled=True)
+        self.assertEqual(collector.collect(), [])
+        collector.close()
+        self.assertEqual(nvml.init_calls, 0)
+        self.assertEqual(nvml.shutdown_calls, 0)
+
     def test_mig_gpu_rejects_the_entire_batch(self) -> None:
         nvml = FakeNvml(mig=True)
         with self.assertRaisesRegex(CollectionError, "MIG"):

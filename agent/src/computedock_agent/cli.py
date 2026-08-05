@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import sys
 import threading
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from .agent import Agent
 from .collector import NvmlCollector
@@ -32,6 +33,13 @@ def install_signal_handlers(stop_event: threading.Event) -> None:
     signal.signal(signal.SIGINT, request_stop)
 
 
+def gpu_collection_is_disabled(environment: Mapping[str, str]) -> bool:
+    visible_devices = environment.get("NVIDIA_VISIBLE_DEVICES")
+    return visible_devices is not None and (
+        visible_devices.strip().lower() in {"", "none", "void"}
+    )
+
+
 def run_cli(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     arguments = parser.parse_args(argv)
@@ -45,7 +53,7 @@ def run_cli(argv: Sequence[str] | None = None) -> int:
 
     stop_event = threading.Event()
     install_signal_handlers(stop_event)
-    collector = NvmlCollector()
+    collector = NvmlCollector(disabled=gpu_collection_is_disabled(os.environ))
     if config.test_output is not None:
         reporter = JsonLinesReporter(config.test_output)
     else:

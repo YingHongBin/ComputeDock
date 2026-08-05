@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from computedock_agent.agent import Agent, build_payload, next_collection_deadline
-from computedock_agent.cli import install_signal_handlers
+from computedock_agent.cli import gpu_collection_is_disabled, install_signal_handlers
 from computedock_agent.collector import GpuMetric
 
 
@@ -128,6 +128,16 @@ class AgentTests(unittest.TestCase):
             install_signal_handlers(event)
         callbacks[signal.SIGTERM](signal.SIGTERM, None)
         self.assertTrue(event.is_set())
+
+    def test_gpu_collection_is_disabled_only_for_explicit_empty_modes(self) -> None:
+        for value in ("void", " VOID ", "none", ""):
+            with self.subTest(value=value):
+                self.assertTrue(
+                    gpu_collection_is_disabled({"NVIDIA_VISIBLE_DEVICES": value})
+                )
+        for environment in ({}, {"NVIDIA_VISIBLE_DEVICES": "all"}, {"NVIDIA_VISIBLE_DEVICES": "0,1"}):
+            with self.subTest(environment=environment):
+                self.assertFalse(gpu_collection_is_disabled(environment))
 
 
 if __name__ == "__main__":

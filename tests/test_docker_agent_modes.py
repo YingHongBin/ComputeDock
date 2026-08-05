@@ -26,10 +26,12 @@ class DockerAgentModeTests(unittest.TestCase):
             "https://nbdataxai.com/monitor/api/v1/agent/samples",
         )
 
-    def build_docker_arguments(self, mode: str) -> list[str]:
+    def build_docker_arguments(
+        self, mode: str, gpu_selection: str = ""
+    ) -> list[str]:
         command = rf'''
             source create_container.sh
-            GPU_SELECTION=""
+            GPU_SELECTION="{gpu_selection}"
             CPU_SELECTION="0-1"
             MEMORY_GIB="8"
             SHM_MIB="4096"
@@ -52,6 +54,17 @@ class DockerAgentModeTests(unittest.TestCase):
             text=True,
         )
         return result.stdout.splitlines()
+
+    def test_no_gpu_mode_explicitly_disables_nvidia_device_injection(self) -> None:
+        arguments = self.build_docker_arguments("report")
+        self.assertIn("NVIDIA_VISIBLE_DEVICES=void", arguments)
+        self.assertNotIn("--gpus", arguments)
+
+    def test_gpu_mode_requests_only_selected_devices(self) -> None:
+        arguments = self.build_docker_arguments("report", "1,3")
+        self.assertNotIn("NVIDIA_VISIBLE_DEVICES=void", arguments)
+        gpu_option = arguments.index("--gpus")
+        self.assertEqual(arguments[gpu_option + 1], '"device=1,3"')
 
     def test_report_mode_passes_url_and_token_without_test_output(self) -> None:
         arguments = self.build_docker_arguments("report")
