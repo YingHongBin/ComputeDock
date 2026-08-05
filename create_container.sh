@@ -3,7 +3,7 @@
 set -u
 set -o pipefail
 
-readonly IMAGE_DEFAULT="dilab-base:cuda-12.8-v4"
+readonly IMAGE_DEFAULT="dilab-base:cuda-12.8-v5"
 readonly AGENT_TEST_OUTPUT_PATH="/opt/computedock-agent/test-samples.jsonl"
 readonly AGENT_SERVER_URL_DEFAULT="https://nbdataxai.com/monitor/api/v1/agent/samples"
 
