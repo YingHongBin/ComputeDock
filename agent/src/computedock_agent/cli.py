@@ -6,6 +6,7 @@ import signal
 import sys
 import threading
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 from .agent import Agent
 from .collector import NvmlCollector
@@ -33,11 +34,24 @@ def install_signal_handlers(stop_event: threading.Event) -> None:
     signal.signal(signal.SIGINT, request_stop)
 
 
-def gpu_collection_is_disabled(environment: Mapping[str, str]) -> bool:
+def has_nvidia_gpu_device(device_root: Path = Path("/dev")) -> bool:
+    if not (device_root / "nvidiactl").exists():
+        return False
+    return any(
+        path.name.removeprefix("nvidia").isdigit()
+        for path in device_root.glob("nvidia*")
+    )
+
+
+def gpu_collection_is_disabled(
+    environment: Mapping[str, str],
+    device_root: Path = Path("/dev"),
+) -> bool:
     visible_devices = environment.get("NVIDIA_VISIBLE_DEVICES")
-    return visible_devices is not None and (
+    explicitly_disabled = visible_devices is not None and (
         visible_devices.strip().lower() in {"", "none", "void"}
     )
+    return explicitly_disabled and not has_nvidia_gpu_device(device_root)
 
 
 def run_cli(argv: Sequence[str] | None = None) -> int:

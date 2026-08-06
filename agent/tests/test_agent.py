@@ -3,12 +3,18 @@ from __future__ import annotations
 import io
 import logging
 import signal
+import tempfile
 import threading
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from computedock_agent.agent import Agent, build_payload, next_collection_deadline
-from computedock_agent.cli import gpu_collection_is_disabled, install_signal_handlers
+from computedock_agent.cli import (
+    gpu_collection_is_disabled,
+    has_nvidia_gpu_device,
+    install_signal_handlers,
+)
 from computedock_agent.collector import GpuMetric
 
 
@@ -130,14 +136,49 @@ class AgentTests(unittest.TestCase):
         self.assertTrue(event.is_set())
 
     def test_gpu_collection_is_disabled_only_for_explicit_empty_modes(self) -> None:
-        for value in ("void", " VOID ", "none", ""):
-            with self.subTest(value=value):
-                self.assertTrue(
-                    gpu_collection_is_disabled({"NVIDIA_VISIBLE_DEVICES": value})
+        with tempfile.TemporaryDirectory() as directory:
+            device_root = Path(directory)
+            for value in ("void", " VOID ", "none", ""):
+                with self.subTest(value=value):
+                    self.assertTrue(
+                        gpu_collection_is_disabled(
+                            {"NVIDIA_VISIBLE_DEVICES": value}, device_root
+                        )
+                    )
+            for environment in (
+                {},
+                {"NVIDIA_VISIBLE_DEVICES": "all"},
+                {"NVIDIA_VISIBLE_DEVICES": "0,1"},
+            ):
+                with self.subTest(environment=environment):
+                    self.assertFalse(
+                        gpu_collection_is_disabled(environment, device_root)
+                    )
+
+    def test_bound_gpu_overrides_a_stale_void_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            device_root = Path(directory)
+            (device_root / "nvidiactl").touch()
+            (device_root / "nvidia4").touch()
+
+            self.assertTrue(has_nvidia_gpu_device(device_root))
+            self.assertFalse(
+                gpu_collection_is_disabled(
+                    {"NVIDIA_VISIBLE_DEVICES": "void"}, device_root
                 )
-        for environment in ({}, {"NVIDIA_VISIBLE_DEVICES": "all"}, {"NVIDIA_VISIBLE_DEVICES": "0,1"}):
-            with self.subTest(environment=environment):
-                self.assertFalse(gpu_collection_is_disabled(environment))
+            )
+
+    def test_control_device_without_a_gpu_remains_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            device_root = Path(directory)
+            (device_root / "nvidiactl").touch()
+
+            self.assertFalse(has_nvidia_gpu_device(device_root))
+            self.assertTrue(
+                gpu_collection_is_disabled(
+                    {"NVIDIA_VISIBLE_DEVICES": "void"}, device_root
+                )
+            )
 
 
 if __name__ == "__main__":
