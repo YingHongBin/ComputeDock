@@ -36,7 +36,7 @@ FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
 ## 容器构建
 
 ```shell
-docker build -t dilab-base:cuda-12.8-v5 .
+docker build -t dilab-base:cuda-12.8-v6 .
 ```
 
 - 使用--gpus参数指定容器使用的具体GPU卡
@@ -68,12 +68,15 @@ chmod +x create_container.sh
 镜像和数据根目录的默认值来自执行脚本时当前目录下的 `create_container.conf`：
 
 ```ini
-IMAGE_DEFAULT=dilab-base:cuda-12.8-v5
+IMAGE_DEFAULT=dilab-base:cuda-12.8-v6
 DATA_ROOT_DEFAULT=/data
 SSH_PORT_RANGE=50000-60000
+MEMORY_GIB_DEFAULT=256
+AGENT_MODE_DEFAULT=report
+AGENT_INTERVAL_DEFAULT=15
 ```
 
-配置文件为必需项；当前执行目录中不存在 `create_container.conf` 时，脚本会报错退出。配置文件只接受上述三个 `KEY=VALUE` 配置项，不会作为 Shell 代码执行。`SSH_PORT_RANGE` 使用 `起始端口-结束端口` 格式；脚本会避开宿主机监听端口和已有 Docker 容器映射端口，推荐范围内第一个可用端口，并将输入限制在该范围内。设为 `0` 时不限制范围，也不提供默认推荐值。可通过 `COMPUTEDOCK_CONFIG_FILE` 指定其他配置文件；单次执行还可使用 `COMPUTEDOCK_DEFAULT_IMAGE` 和 `COMPUTEDOCK_DATA_ROOT` 覆盖文件中的默认值。
+配置文件为必需项；当前执行目录中不存在 `create_container.conf` 时，脚本会报错退出。配置文件只接受上述六个 `KEY=VALUE` 配置项，不会作为 Shell 代码执行。`SSH_PORT_RANGE` 使用 `起始端口-结束端口` 格式；脚本会避开宿主机监听端口和已有 Docker 容器映射端口，推荐范围内第一个可用端口，并将输入限制在该范围内。设为 `0` 时不限制范围，也不提供默认推荐值。`MEMORY_GIB_DEFAULT` 必须是 1 到 1048576 之间的 GiB 整数，`AGENT_MODE_DEFAULT` 必须为 `report` 或 `test`，`AGENT_INTERVAL_DEFAULT` 必须是 5 到 3600 之间的秒数。可通过 `COMPUTEDOCK_CONFIG_FILE` 指定其他配置文件；单次执行还可使用 `COMPUTEDOCK_DEFAULT_IMAGE` 和 `COMPUTEDOCK_DATA_ROOT` 覆盖文件中的默认值。
 
 脚本启动时会显示宿主机 GPU、CPU、内存的静态容量，以及运行中容器的 GPU/CPU 绑定、内存上限、共享内存和端口映射，不采集实时使用率。端口按 `宿主机端口->容器端口/协议` 展示；没有映射时显示 `-`。随后依次输入 GPU（可留空）、CPU 核、内存上限、SSH 端口、容器用户、密码、容器名、宿主机数据根目录、镜像、Agent 运行模式和采集间隔。Agent 名称自动使用 Docker 容器名。
 
@@ -94,7 +97,7 @@ CPU 核会自动排序、去重并合并连续区间，例如 `3,2,2,1,8,7` 会�
 - 显示包含明文密码和 Token 的完整命令，并在确认后创建容器；
 - 检查容器是否保持运行，并等待 SSH 和 Agent 都进入健康状态；失败时显示 Supervisor 状态和容器日志，并保留容器供排查。
 
-内存只需输入 GiB 数值，例如输入 `256` 会生成 `-m 256G`、`--memory-swap 256G`，并自动将 `--shm-size` 设置为内存的一半。SSH 宿主机端口可以直接回车接受推荐值，也可以输入配置范围内的其他可用端口。最终挂载目录固定为 `<数据根目录>/<容器名称>`；确认创建后，目录不存在时脚本会申请 `sudo` 权限，创建目录并将 owner 修改为 `1001:1001`；目录已存在时直接复用，不申请 `sudo`，也不修改现有 owner。该 UID/GID 是新建宿主机挂载目录与容器交互用户之间的固定契约，不属于外部配置；容器启动时会校验交互用户的实际 UID/GID，不匹配则拒绝启动。
+内存上限、Agent 运行模式和采集间隔可以直接回车采用配置文件中的默认值。内存使用 GiB 整数，例如 `256` 会生成 `-m 256G`、`--memory-swap 256G`，并自动将 `--shm-size` 设置为内存的一半。SSH 宿主机端口可以直接回车接受推荐值，也可以输入配置范围内的其他可用端口。最终挂载目录固定为 `<数据根目录>/<容器名称>`；确认创建后，目录不存在时脚本会申请 `sudo` 权限，创建目录并将 owner 修改为 `1001:1001`；目录已存在时直接复用，不申请 `sudo`，也不修改现有 owner。该 UID/GID 是新建宿主机挂载目录与容器交互用户之间的固定契约，不属于外部配置；容器启动时会校验交互用户的实际 UID/GID，不匹配则拒绝启动。
 
 密码和 Agent Token 采用明文输入，并会出现在配置摘要和命令预览中。脚本执行时仍通过临时环境变量传入 Docker；容器管理员也可从容器配置中查看 `NEW_PWD` 和 `COMPUTEDOCK_TOKEN`。
 
@@ -118,7 +121,7 @@ docker run -itd \
     -e COMPUTEDOCK_STATE_DIR="/var/lib/computedock-agent" \
     -v /data/hongbin:/home/hongbin \
     --name hongbin \
-    dilab-base:cuda-12.8-v5
+    dilab-base:cuda-12.8-v6
 ```
 
 容器内的 Supervisor 会在 Agent 异常退出后等待 5 秒并持续重启。配置错误不会无限重启；Agent、SSH 或实际 Agent 子进程缺失时，Docker 健康状态会变为 `unhealthy`。镜像不设置 Docker 自动重启策略，Supervisor 或整个容器退出后需要管理员自行恢复。
@@ -139,7 +142,7 @@ docker run -itd \
     -e COMPUTEDOCK_INTERVAL="15" \
     -e COMPUTEDOCK_TEST_OUTPUT="1" \
     --name agent-test-01 \
-    dilab-base:cuda-12.8-v5
+    dilab-base:cuda-12.8-v6
 ```
 
 查看持续追加的测试数据：

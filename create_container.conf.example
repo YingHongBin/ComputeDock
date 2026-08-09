@@ -1,5 +1,8 @@
 # ComputeDock container creation defaults.
 # Values are parsed as plain KEY=VALUE pairs and are never executed as shell code.
-IMAGE_DEFAULT=dilab-base:cuda-12.8-v5
+IMAGE_DEFAULT=dilab-base:cuda-12.8-v6
 DATA_ROOT_DEFAULT=/data
 SSH_PORT_RANGE=50000-60000
+MEMORY_GIB_DEFAULT=256
+AGENT_MODE_DEFAULT=report
+AGENT_INTERVAL_DEFAULT=15

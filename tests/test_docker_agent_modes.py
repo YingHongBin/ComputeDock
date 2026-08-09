@@ -33,7 +33,8 @@ class DockerAgentModeTests(unittest.TestCase):
             source create_container.sh
             COMPUTEDOCK_CONFIG_FILE=create_container.conf.example
             load_configuration
-            printf '%s\n' "$IMAGE_DEFAULT" "$DATA_ROOT_DEFAULT" "$SSH_PORT_RANGE"
+            printf '%s\n' "$IMAGE_DEFAULT" "$DATA_ROOT_DEFAULT" "$SSH_PORT_RANGE" \
+                "$MEMORY_GIB_DEFAULT" "$AGENT_MODE_DEFAULT" "$AGENT_INTERVAL_DEFAULT"
         '''
         result = subprocess.run(
             ["bash", "-c", command],
@@ -44,7 +45,14 @@ class DockerAgentModeTests(unittest.TestCase):
         )
         self.assertEqual(
             result.stdout.splitlines(),
-            ["dilab-base:cuda-12.8-v5", "/data", "50000-60000"],
+            [
+                "dilab-base:cuda-12.8-v6",
+                "/data",
+                "50000-60000",
+                "256",
+                "report",
+                "15",
+            ],
         )
 
     def test_environment_can_override_config_defaults(self) -> None:
@@ -74,14 +82,18 @@ class DockerAgentModeTests(unittest.TestCase):
             (execution_directory / "create_container.conf").write_text(
                 "IMAGE_DEFAULT=computedock:from-cwd\n"
                 "DATA_ROOT_DEFAULT=/srv/from-cwd\n"
-                "SSH_PORT_RANGE=51000-51999\n",
+                "SSH_PORT_RANGE=51000-51999\n"
+                "MEMORY_GIB_DEFAULT=64\n"
+                "AGENT_MODE_DEFAULT=test\n"
+                "AGENT_INTERVAL_DEFAULT=30\n",
                 encoding="utf-8",
             )
             script = shlex.quote(str(PROJECT_ROOT / "create_container.sh"))
             command = f'''
                 source {script}
                 load_configuration
-                printf '%s\n' "$IMAGE_DEFAULT" "$DATA_ROOT_DEFAULT" "$SSH_PORT_RANGE"
+                printf '%s\n' "$IMAGE_DEFAULT" "$DATA_ROOT_DEFAULT" "$SSH_PORT_RANGE" \
+                    "$MEMORY_GIB_DEFAULT" "$AGENT_MODE_DEFAULT" "$AGENT_INTERVAL_DEFAULT"
             '''
             result = subprocess.run(
                 ["bash", "-c", command],
@@ -92,8 +104,36 @@ class DockerAgentModeTests(unittest.TestCase):
             )
         self.assertEqual(
             result.stdout.splitlines(),
-            ["computedock:from-cwd", "/srv/from-cwd", "51000-51999"],
+            [
+                "computedock:from-cwd",
+                "/srv/from-cwd",
+                "51000-51999",
+                "64",
+                "test",
+                "30",
+            ],
         )
+
+    def test_configured_interactive_defaults_are_used(self) -> None:
+        command = r'''
+            source create_container.sh
+            COMPUTEDOCK_CONFIG_FILE=create_container.conf.example
+            load_configuration
+            HOST_MEM_TOTAL_KIB=""
+            prompt_memory <<< ""
+            prompt_agent_mode <<< ""
+            prompt_agent_interval <<< ""
+            printf '\n%s\n%s\n%s\n%s\n' \
+                "$MEMORY_GIB" "$SHM_MIB" "$AGENT_MODE" "$AGENT_INTERVAL"
+        '''
+        result = subprocess.run(
+            ["bash", "-c", command],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.stdout.splitlines()[-4:], ["256", "131072", "report", "15"])
 
     def test_port_recommendation_skips_used_ports(self) -> None:
         command = r'''
@@ -218,7 +258,10 @@ class DockerAgentModeTests(unittest.TestCase):
             (execution_directory / "create_container.conf").write_text(
                 "IMAGE_DEFAULT=computedock:test\n"
                 "DATA_ROOT_DEFAULT=/srv/data\n"
-                "SSH_PORT_RANGE=60000-50000\n",
+                "SSH_PORT_RANGE=60000-50000\n"
+                "MEMORY_GIB_DEFAULT=64\n"
+                "AGENT_MODE_DEFAULT=report\n"
+                "AGENT_INTERVAL_DEFAULT=15\n",
                 encoding="utf-8",
             )
             script = shlex.quote(str(PROJECT_ROOT / "create_container.sh"))

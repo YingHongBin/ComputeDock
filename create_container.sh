@@ -12,6 +12,9 @@ readonly AGENT_SERVER_URL_DEFAULT="https://nbdataxai.com/monitor/api/v1/agent/sa
 IMAGE_DEFAULT=""
 DATA_ROOT_DEFAULT=""
 SSH_PORT_RANGE=""
+MEMORY_GIB_DEFAULT=""
+AGENT_MODE_DEFAULT=""
+AGENT_INTERVAL_DEFAULT=""
 password=""
 agent_token=""
 GPU_DATA=""
@@ -20,7 +23,7 @@ ONLINE_CPU_CSV=""
 HOST_MEM_TOTAL_KIB=""
 AGENT_SERVER_URL="$AGENT_SERVER_URL_DEFAULT"
 AGENT_INTERVAL=""
-AGENT_MODE="report"
+AGENT_MODE=""
 DATA_ROOT=""
 
 info() {
@@ -216,7 +219,9 @@ load_configuration() {
     local config_file="${COMPUTEDOCK_CONFIG_FILE:-$CONFIG_FILE_DEFAULT}"
     local raw_line line key value
     local configured_image="" configured_data_root="" configured_port_range=""
+    local configured_memory_gib="" configured_agent_mode="" configured_agent_interval=""
     local image_seen=0 data_root_seen=0 port_range_seen=0
+    local memory_seen=0 agent_mode_seen=0 agent_interval_seen=0
 
     [[ -e "$config_file" ]] \
         || die "当前执行目录缺少配置文件 '$config_file'。"
@@ -251,6 +256,24 @@ load_configuration() {
                 configured_port_range="$value"
                 port_range_seen=1
                 ;;
+            MEMORY_GIB_DEFAULT)
+                (( memory_seen == 0 )) \
+                    || die "配置项 MEMORY_GIB_DEFAULT 不能重复。"
+                configured_memory_gib="$value"
+                memory_seen=1
+                ;;
+            AGENT_MODE_DEFAULT)
+                (( agent_mode_seen == 0 )) \
+                    || die "配置项 AGENT_MODE_DEFAULT 不能重复。"
+                configured_agent_mode="$value"
+                agent_mode_seen=1
+                ;;
+            AGENT_INTERVAL_DEFAULT)
+                (( agent_interval_seen == 0 )) \
+                    || die "配置项 AGENT_INTERVAL_DEFAULT 不能重复。"
+                configured_agent_interval="$value"
+                agent_interval_seen=1
+                ;;
             *) die "不支持的配置项 '$key'。" ;;
         esac
     done < "$config_file"
@@ -272,7 +295,24 @@ load_configuration() {
         || die "DATA_ROOT_DEFAULT '$DATA_ROOT_DEFAULT' 已存在，但不是目录。"
     SSH_PORT_RANGE=$(normalize_ssh_port_range "$configured_port_range") \
         || die "配置文件必须提供有效的 SSH_PORT_RANGE（0 或 1-65535 范围，如 50000-60000）。"
+    if [[ ! "$configured_memory_gib" =~ ^[0-9]+$ ]] \
+        || (( ${#configured_memory_gib} > 7 )) \
+        || (( 10#$configured_memory_gib < 1 || 10#$configured_memory_gib > 1048576 )); then
+        die "配置文件必须提供有效的 MEMORY_GIB_DEFAULT（1 到 1048576 GiB）。"
+    fi
+    MEMORY_GIB_DEFAULT=$((10#$configured_memory_gib))
+    case "$configured_agent_mode" in
+        report|test) AGENT_MODE_DEFAULT="$configured_agent_mode" ;;
+        *) die "配置文件必须提供有效的 AGENT_MODE_DEFAULT（report 或 test）。" ;;
+    esac
+    if [[ ! "$configured_agent_interval" =~ ^[0-9]+$ ]] \
+        || (( ${#configured_agent_interval} > 4 )) \
+        || (( 10#$configured_agent_interval < 5 || 10#$configured_agent_interval > 3600 )); then
+        die "配置文件必须提供有效的 AGENT_INTERVAL_DEFAULT（5 到 3600 秒）。"
+    fi
+    AGENT_INTERVAL_DEFAULT=$((10#$configured_agent_interval))
     readonly IMAGE_DEFAULT DATA_ROOT_DEFAULT SSH_PORT_RANGE
+    readonly MEMORY_GIB_DEFAULT AGENT_MODE_DEFAULT AGENT_INTERVAL_DEFAULT
 }
 
 gpu_uuid_to_index() {
@@ -512,9 +552,10 @@ prompt_agent_server_url() {
 prompt_agent_mode() {
     local value
     while true; do
-        printf 'Agent 运行模式（report=远程上报，test=写入本地文件）[report]: '
+        printf 'Agent 运行模式（report=远程上报，test=写入本地文件）[%s]: ' \
+            "$AGENT_MODE_DEFAULT"
         IFS= read -r value || exit 1
-        [[ -n "$value" ]] || value="report"
+        [[ -n "$value" ]] || value="$AGENT_MODE_DEFAULT"
         case "$value" in
             report|test)
                 AGENT_MODE="$value"
@@ -530,9 +571,9 @@ prompt_agent_mode() {
 prompt_agent_interval() {
     local value
     while true; do
-        printf 'Agent 采集间隔（秒）[15]: '
+        printf 'Agent 采集间隔（秒）[%s]: ' "$AGENT_INTERVAL_DEFAULT"
         IFS= read -r value || exit 1
-        [[ -n "$value" ]] || value="15"
+        [[ -n "$value" ]] || value="$AGENT_INTERVAL_DEFAULT"
         if [[ ! "$value" =~ ^[0-9]+$ ]] || (( ${#value} > 4 )); then
             warn "采集间隔必须是 5 到 3600 之间的整数。"
             continue
@@ -626,8 +667,9 @@ prepare_mount_path() {
 prompt_memory() {
     local value requested_kib
     while true; do
-        printf '容器内存上限（GiB，仅输入正整数）: '
+        printf '容器内存上限（GiB，仅输入正整数）[%s]: ' "$MEMORY_GIB_DEFAULT"
         IFS= read -r value || exit 1
+        [[ -n "$value" ]] || value="$MEMORY_GIB_DEFAULT"
         if [[ ! "$value" =~ ^[0-9]+$ ]]; then
             warn "内存必须是大于 0 的整数。"
             continue
