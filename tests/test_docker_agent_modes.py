@@ -32,7 +32,7 @@ class DockerAgentModeTests(unittest.TestCase):
         command = r'''
             source create_container.sh
             load_configuration
-            printf '%s\n' "$IMAGE_DEFAULT" "$DATA_ROOT_DEFAULT"
+            printf '%s\n' "$IMAGE_DEFAULT" "$DATA_ROOT_DEFAULT" "$SSH_PORT_RANGE"
         '''
         result = subprocess.run(
             ["bash", "-c", command],
@@ -43,7 +43,7 @@ class DockerAgentModeTests(unittest.TestCase):
         )
         self.assertEqual(
             result.stdout.splitlines(),
-            ["dilab-base:cuda-12.8-v5", "/data"],
+            ["dilab-base:cuda-12.8-v5", "/data", "50000-60000"],
         )
 
     def test_environment_can_override_config_defaults(self) -> None:
@@ -71,14 +71,15 @@ class DockerAgentModeTests(unittest.TestCase):
             execution_directory = Path(directory)
             (execution_directory / "create_container.conf").write_text(
                 "IMAGE_DEFAULT=computedock:from-cwd\n"
-                "DATA_ROOT_DEFAULT=/srv/from-cwd\n",
+                "DATA_ROOT_DEFAULT=/srv/from-cwd\n"
+                "SSH_PORT_RANGE=51000-51999\n",
                 encoding="utf-8",
             )
             script = shlex.quote(str(PROJECT_ROOT / "create_container.sh"))
             command = f'''
                 source {script}
                 load_configuration
-                printf '%s\n' "$IMAGE_DEFAULT" "$DATA_ROOT_DEFAULT"
+                printf '%s\n' "$IMAGE_DEFAULT" "$DATA_ROOT_DEFAULT" "$SSH_PORT_RANGE"
             '''
             result = subprocess.run(
                 ["bash", "-c", command],
@@ -89,8 +90,145 @@ class DockerAgentModeTests(unittest.TestCase):
             )
         self.assertEqual(
             result.stdout.splitlines(),
-            ["computedock:from-cwd", "/srv/from-cwd"],
+            ["computedock:from-cwd", "/srv/from-cwd", "51000-51999"],
         )
+
+    def test_port_recommendation_skips_used_ports(self) -> None:
+        command = r'''
+            source create_container.sh
+            SSH_PORT_RANGE="50000-50003"
+            list_used_tcp_ports() {
+                printf '%s\n' 22 50000 50001
+            }
+            recommend_ssh_port
+        '''
+        result = subprocess.run(
+            ["bash", "-c", command],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.stdout.strip(), "50002")
+
+    def test_container_port_bindings_are_displayed_and_deduplicated(self) -> None:
+        command = r'''
+            source create_container.sh
+            docker() {
+                printf '%s\n' '52236->22/tcp' '8080->80/tcp' '52236->22/tcp'
+            }
+            container_port_bindings container-id
+        '''
+        result = subprocess.run(
+            ["bash", "-c", command],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.stdout.strip(), "52236->22/tcp,8080->80/tcp")
+
+    def test_container_without_port_bindings_displays_dash(self) -> None:
+        command = r'''
+            source create_container.sh
+            docker() {
+                return 0
+            }
+            container_port_bindings container-id
+        '''
+        result = subprocess.run(
+            ["bash", "-c", command],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.stdout.strip(), "-")
+
+    def test_prompt_port_accepts_recommended_port(self) -> None:
+        command = r'''
+            source create_container.sh
+            SSH_PORT_RANGE="50000-50003"
+            list_used_tcp_ports() {
+                printf '%s\n' 50000
+            }
+            port_is_in_use() {
+                return 1
+            }
+            prompt_port <<< ""
+            printf '\n%s\n' "$SSH_PORT"
+        '''
+        result = subprocess.run(
+            ["bash", "-c", command],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.stdout.splitlines()[-1], "50001")
+
+    def test_zero_port_range_allows_any_valid_unused_port(self) -> None:
+        command = r'''
+            source create_container.sh
+            SSH_PORT_RANGE="0"
+            port_is_in_use() {
+                return 1
+            }
+            prompt_port <<< "40000"
+            printf '\n%s\n' "$SSH_PORT"
+        '''
+        result = subprocess.run(
+            ["bash", "-c", command],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.stdout.splitlines()[-1], "40000")
+
+    def test_prompt_port_rejects_value_outside_configured_range(self) -> None:
+        command = r'''
+            source create_container.sh
+            SSH_PORT_RANGE="50000-50003"
+            list_used_tcp_ports() {
+                return 0
+            }
+            port_is_in_use() {
+                return 1
+            }
+            prompt_port <<<'40000
+50003'
+            printf '\n%s\n' "$SSH_PORT"
+        '''
+        result = subprocess.run(
+            ["bash", "-c", command],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.stdout.splitlines()[-1], "50003")
+        self.assertIn("端口必须位于配置范围 50000-50003 内", result.stderr)
+
+    def test_invalid_port_range_in_config_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            execution_directory = Path(directory)
+            (execution_directory / "create_container.conf").write_text(
+                "IMAGE_DEFAULT=computedock:test\n"
+                "DATA_ROOT_DEFAULT=/srv/data\n"
+                "SSH_PORT_RANGE=60000-50000\n",
+                encoding="utf-8",
+            )
+            script = shlex.quote(str(PROJECT_ROOT / "create_container.sh"))
+            result = subprocess.run(
+                ["bash", "-c", f"source {script}; load_configuration"],
+                cwd=execution_directory,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("有效的 SSH_PORT_RANGE", result.stderr)
 
     def test_missing_config_in_execution_directory_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

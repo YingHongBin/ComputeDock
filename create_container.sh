@@ -11,6 +11,7 @@ readonly AGENT_SERVER_URL_DEFAULT="https://nbdataxai.com/monitor/api/v1/agent/sa
 
 IMAGE_DEFAULT=""
 DATA_ROOT_DEFAULT=""
+SSH_PORT_RANGE=""
 password=""
 agent_token=""
 GPU_DATA=""
@@ -195,11 +196,27 @@ trim_whitespace() {
     sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
 }
 
+normalize_ssh_port_range() {
+    local value="$1"
+    local range_start range_end
+
+    if [[ "$value" == "0" ]]; then
+        printf '%s\n' "0"
+        return
+    fi
+    [[ "$value" =~ ^([0-9]{1,5})-([0-9]{1,5})$ ]] || return 1
+    range_start=$((10#${BASH_REMATCH[1]}))
+    range_end=$((10#${BASH_REMATCH[2]}))
+    (( range_start >= 1 && range_end <= 65535 && range_start <= range_end )) \
+        || return 1
+    printf '%s-%s\n' "$range_start" "$range_end"
+}
+
 load_configuration() {
     local config_file="${COMPUTEDOCK_CONFIG_FILE:-$CONFIG_FILE_DEFAULT}"
     local raw_line line key value
-    local configured_image="" configured_data_root=""
-    local image_seen=0 data_root_seen=0
+    local configured_image="" configured_data_root="" configured_port_range=""
+    local image_seen=0 data_root_seen=0 port_range_seen=0
 
     [[ -e "$config_file" ]] \
         || die "当前执行目录缺少配置文件 '$config_file'。"
@@ -228,6 +245,12 @@ load_configuration() {
                 configured_data_root="$value"
                 data_root_seen=1
                 ;;
+            SSH_PORT_RANGE)
+                (( port_range_seen == 0 )) \
+                    || die "配置项 SSH_PORT_RANGE 不能重复。"
+                configured_port_range="$value"
+                port_range_seen=1
+                ;;
             *) die "不支持的配置项 '$key'。" ;;
         esac
     done < "$config_file"
@@ -247,7 +270,9 @@ load_configuration() {
         || die "DATA_ROOT_DEFAULT 不能是宿主机根目录。"
     [[ ! -e "$DATA_ROOT_DEFAULT" || -d "$DATA_ROOT_DEFAULT" ]] \
         || die "DATA_ROOT_DEFAULT '$DATA_ROOT_DEFAULT' 已存在，但不是目录。"
-    readonly IMAGE_DEFAULT DATA_ROOT_DEFAULT
+    SSH_PORT_RANGE=$(normalize_ssh_port_range "$configured_port_range") \
+        || die "配置文件必须提供有效的 SSH_PORT_RANGE（0 或 1-65535 范围，如 50000-60000）。"
+    readonly IMAGE_DEFAULT DATA_ROOT_DEFAULT SSH_PORT_RANGE
 }
 
 gpu_uuid_to_index() {
@@ -332,8 +357,31 @@ container_gpu_binding() {
     esac
 }
 
+container_port_bindings() {
+    local container_id="$1"
+    local bindings formatted
+
+    if ! bindings=$(docker inspect --format \
+        '{{range $containerPort, $hostBindings := .NetworkSettings.Ports}}{{range $hostBindings}}{{printf "%s->%s\n" .HostPort $containerPort}}{{end}}{{end}}' \
+        "$container_id" 2>/dev/null); then
+        warn "无法读取容器 $container_id 的端口映射。"
+        printf '%s\n' "无法识别"
+        return
+    fi
+
+    formatted=$(printf '%s\n' "$bindings" | awk '
+        NF && !seen[$0]++ {
+            if (found) printf ","
+            printf "%s", $0
+            found = 1
+        }
+        END { if (found) printf "\n" }
+    ')
+    printf '%s\n' "${formatted:--}"
+}
+
 show_resource_snapshot() {
-    local ids id name cpus compact_cpus gpus memory_bytes shm_bytes memory_limit shm_limit
+    local ids id name cpus compact_cpus gpus ports memory_bytes shm_bytes memory_limit shm_limit
 
     printf '\n========== 宿主机资源快照 =========='
     printf '\n在线 CPU: %s\n' "$ONLINE_CPU_SPEC"
@@ -357,7 +405,8 @@ show_resource_snapshot() {
     fi
 
     printf '\n运行中容器的资源分配：\n'
-    printf '%-24s %-16s %-24s %-14s %-14s\n' "容器" "CPU 核" "GPU" "内存上限" "共享内存"
+    printf '%-24s %-16s %-24s %-14s %-14s %s\n' \
+        "容器" "CPU 核" "GPU" "内存上限" "共享内存" "端口映射（宿主机->容器）"
     ids=$(docker ps -q)
     if [[ -z "$ids" ]]; then
         printf '%s\n' "（当前没有运行中的容器）"
@@ -373,11 +422,13 @@ show_resource_snapshot() {
                 cpus="全部/未限制"
             fi
             gpus=$(container_gpu_binding "$id")
+            ports=$(container_port_bindings "$id")
             memory_bytes=$(docker inspect --format '{{.HostConfig.Memory}}' "$id" 2>/dev/null || true)
             shm_bytes=$(docker inspect --format '{{.HostConfig.ShmSize}}' "$id" 2>/dev/null || true)
             memory_limit=$(format_bytes "$memory_bytes")
             shm_limit=$(format_bytes "$shm_bytes")
-            printf '%-24.24s %-16.16s %-24.24s %-14.14s %-14.14s\n' "$name" "$cpus" "$gpus" "$memory_limit" "$shm_limit"
+            printf '%-24.24s %-16.16s %-24.24s %-14.14s %-14.14s %s\n' \
+                "$name" "$cpus" "$gpus" "$memory_limit" "$shm_limit" "$ports"
         done <<< "$ids"
     fi
     printf '%s\n\n' "===================================="
@@ -692,11 +743,72 @@ port_is_in_use() {
     [[ -n "$(docker ps -a --filter "publish=$port" -q 2>/dev/null)" ]]
 }
 
+list_used_tcp_ports() {
+    local ids id
+
+    {
+        if command -v ss >/dev/null 2>&1; then
+            ss -H -ltn 2>/dev/null \
+                | awk '{ address=$4; sub(/^.*:/, "", address); print address }'
+        fi
+
+        ids=$(docker ps -aq 2>/dev/null || true)
+        while IFS= read -r id; do
+            [[ -n "$id" ]] || continue
+            docker inspect --format \
+                '{{range $bindings := .HostConfig.PortBindings}}{{range $bindings}}{{println .HostPort}}{{end}}{{end}}' \
+                "$id" 2>/dev/null || true
+        done <<< "$ids"
+    } | awk '/^[0-9]+$/ && $1 >= 1 && $1 <= 65535 { print $1 }' | sort -nu
+}
+
+recommend_ssh_port() {
+    local range_start range_end
+
+    [[ "$SSH_PORT_RANGE" != "0" ]] || return 1
+    range_start=${SSH_PORT_RANGE%-*}
+    range_end=${SSH_PORT_RANGE#*-}
+    list_used_tcp_ports | awk -v start="$range_start" -v end="$range_end" '
+        { used[$1] = 1 }
+        END {
+            for (port = start; port <= end; port++) {
+                if (!(port in used)) {
+                    print port
+                    exit
+                }
+            }
+        }
+    '
+}
+
+port_is_allowed_by_config() {
+    local port="$1"
+    local range_start range_end
+
+    [[ "$SSH_PORT_RANGE" != "0" ]] || return 0
+    range_start=${SSH_PORT_RANGE%-*}
+    range_end=${SSH_PORT_RANGE#*-}
+    (( port >= range_start && port <= range_end ))
+}
+
 prompt_port() {
-    local value
+    local value recommended_port=""
+
+    if [[ "$SSH_PORT_RANGE" != "0" ]]; then
+        recommended_port=$(recommend_ssh_port)
+        [[ -n "$recommended_port" ]] \
+            || die "SSH 端口范围 $SSH_PORT_RANGE 中没有可用端口。"
+    fi
+
     while true; do
-        printf 'SSH 宿主机端口（必须手动输入）: '
+        if [[ -n "$recommended_port" ]]; then
+            printf 'SSH 宿主机端口（范围 %s）[%s]: ' \
+                "$SSH_PORT_RANGE" "$recommended_port"
+        else
+            printf 'SSH 宿主机端口（范围不限制）: '
+        fi
         IFS= read -r value || exit 1
+        [[ -n "$value" ]] || value="$recommended_port"
         if [[ ! "$value" =~ ^[0-9]+$ ]] || (( ${#value} > 5 )); then
             warn "端口必须是 1 到 65535 之间的整数。"
             continue
@@ -706,6 +818,10 @@ prompt_port() {
             continue
         fi
         value=$((10#$value))
+        if ! port_is_allowed_by_config "$value"; then
+            warn "端口必须位于配置范围 $SSH_PORT_RANGE 内。"
+            continue
+        fi
         if port_is_in_use "$value"; then
             warn "端口 $value 已被监听或已映射给 Docker 容器。"
             continue
