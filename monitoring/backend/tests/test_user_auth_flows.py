@@ -165,6 +165,63 @@ def test_verified_registration_requires_admin_approval(monkeypatch) -> None:
     assert client.get("/api/v1/users").status_code == 403
 
 
+def test_registration_verification_can_be_resent_and_invalidates_old_link(monkeypatch) -> None:
+    client, sessions = make_test_app(monkeypatch)
+    tokens = iter(
+        (
+            "first-registration-token-with-enough-length",
+            "second-registration-token-with-enough-length",
+        )
+    )
+    monkeypatch.setattr(
+        "computedock_monitor.notifications.make_email_action_token",
+        lambda: next(tokens),
+    )
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "resend-user",
+            "full_name": "Resend User",
+            "email": "resend@example.test",
+            "password": "long-enough-user-password",
+        },
+    )
+    assert response.status_code == 202
+
+    response = client.post(
+        "/api/v1/auth/registration/resend",
+        json={"identity": "RESEND@EXAMPLE.TEST"},
+    )
+    assert response.status_code == 202
+    assert client.post(
+        "/api/v1/auth/verify-email",
+        json={"token": "first-registration-token-with-enough-length"},
+    ).status_code == 400
+    assert client.post(
+        "/api/v1/auth/verify-email",
+        json={"token": "second-registration-token-with-enough-length"},
+    ).status_code == 204
+    with sessions() as db:
+        notices = list(
+            db.scalars(
+                select(NotificationOutbox).where(
+                    NotificationOutbox.template == "registration_verify"
+                )
+            )
+        )
+        assert len(notices) == 2
+
+
+def test_registration_resend_does_not_reveal_unknown_identity(monkeypatch) -> None:
+    client, _ = make_test_app(monkeypatch)
+    response = client.post(
+        "/api/v1/auth/registration/resend",
+        json={"identity": "unknown@example.test"},
+    )
+    assert response.status_code == 202
+    assert response.json() == {"status": "verification_sent"}
+
+
 def test_rejection_requires_comment(monkeypatch) -> None:
     client, sessions = make_test_app(monkeypatch)
     seed_admin(sessions)

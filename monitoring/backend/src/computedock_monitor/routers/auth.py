@@ -154,14 +154,14 @@ def register(
         updated_at=now,
     )
     db.add(registration)
-    _, secret = issue_action_token(
+    email_token, secret = issue_action_token(
         db,
         purpose="registration_verify",
         registration_request_id=registration.id,
     )
     enqueue_notification(
         db,
-        idempotency_key=f"registration-verify:{registration.id}",
+        idempotency_key=f"registration-verify:{registration.id}:{email_token.id}",
         template="registration_verify",
         to_address=registration.email,
         payload={
@@ -175,6 +175,47 @@ def register(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "username or email is unavailable") from exc
+    return {"status": "verification_sent"}
+
+
+@router.post("/registration/resend", status_code=status.HTTP_202_ACCEPTED)
+def resend_registration_verification(
+    payload: PasswordResetRequest,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict[str, str]:
+    """Send a fresh link without revealing whether a pending registration exists."""
+    identity = payload.identity.strip().lower()
+    registration = db.scalar(
+        select(RegistrationRequest)
+        .where(
+            RegistrationRequest.status == "email_pending",
+            or_(
+                func.lower(RegistrationRequest.username) == identity,
+                func.lower(RegistrationRequest.email) == identity,
+            ),
+        )
+        .order_by(RegistrationRequest.created_at.desc())
+    )
+    if registration is not None:
+        email_token, secret = issue_action_token(
+            db,
+            purpose="registration_verify",
+            registration_request_id=registration.id,
+        )
+        enqueue_notification(
+            db,
+            idempotency_key=f"registration-verify:{registration.id}:{email_token.id}",
+            template="registration_verify",
+            to_address=registration.email,
+            payload={
+                "full_name": registration.full_name,
+                "action_url": action_url(settings, "/verify-email", secret),
+                "expires_hours": 24,
+            },
+        )
+        registration.updated_at = utcnow()
+        db.commit()
     return {"status": "verification_sent"}
 
 
