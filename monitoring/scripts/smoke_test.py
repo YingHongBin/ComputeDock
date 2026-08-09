@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run a destructive-to-test-data-only smoke flow against a live monitoring app."""
+"""Run a test-data-only smoke flow against a live monitoring deployment."""
 
 from __future__ import annotations
 
@@ -86,6 +86,22 @@ def main() -> int:
     assert isinstance(login, dict)
     csrf_headers = {"X-CSRF-Token": str(login["csrf_token"])}
     suffix = uuid.uuid4().hex[:8]
+    users = client.request("GET", "/api/v1/users")
+    assert isinstance(users, list)
+    admin = next(item for item in users if item["username"] == args.username)
+    project = client.request(
+        "POST",
+        "/api/v1/projects",
+        {
+            "code": f"smoke-{suffix}",
+            "name": f"Smoke 项目 {suffix}",
+            "description": "自动冒烟测试数据",
+            "member_ids": [admin["id"]],
+        },
+        csrf_headers,
+        201,
+    )
+    assert isinstance(project, dict)
     resource = client.request(
         "POST",
         "/api/v1/resources",
@@ -94,8 +110,31 @@ def main() -> int:
         201,
     )
     assert isinstance(resource, dict)
+    assert resource["token"] is None
     resource_id = str(resource["id"])
-    token = str(resource["token"])
+    compute_request = client.request(
+        "POST",
+        "/api/v1/compute-requests",
+        {
+            "project_id": project["id"],
+            "resource_id": resource_id,
+            "gpu_count": 1,
+            "duration_days": 1,
+        },
+        csrf_headers,
+        201,
+    )
+    assert isinstance(compute_request, dict)
+    request_id = str(compute_request["id"])
+    approved = client.request(
+        "POST",
+        f"/api/v1/compute-requests/{request_id}/review",
+        {"decision": "approved"},
+        csrf_headers,
+    )
+    assert isinstance(approved, dict)
+    token = str(approved["token"])
+    assert token.startswith("cda_")
     agent_headers = {"Authorization": f"Bearer {token}"}
     now = datetime.now(UTC).replace(microsecond=0) - timedelta(seconds=2)
 
@@ -144,27 +183,35 @@ def main() -> int:
     assert isinstance(regenerated, list)
     assert next(item for item in regenerated if item["name"] == "smoke-worker-1")["generation"] == 2
 
-    client.request(
-        "DELETE", f"/api/v1/resources/{resource_id}", headers=csrf_headers, expected=409
+    pending = client.request(
+        "POST",
+        "/api/v1/compute-requests",
+        {
+            "project_id": project["id"],
+            "resource_id": resource_id,
+            "gpu_count": 1,
+            "duration_days": 1,
+        },
+        csrf_headers,
+        201,
     )
-    for active_container in regenerated:
-        client.request(
-            "DELETE",
-            f"/api/v1/resources/{resource_id}/containers/{active_container['id']}",
-            headers=csrf_headers,
-            expected=204,
-        )
+    assert isinstance(pending, dict)
     client.request(
-        "DELETE", f"/api/v1/resources/{resource_id}", headers=csrf_headers, expected=204
+        "POST", f"/api/v1/resources/{resource_id}/disable", headers=csrf_headers
     )
+    rejected = client.request("GET", f"/api/v1/compute-requests/{pending['id']}")
+    assert isinstance(rejected, dict)
+    assert rejected["approval_status"] == "rejected"
+    assert rejected["review_comment"] == "关联算力资源已禁用"
+
+    # Disabling a resource only rejects pending work; approved tokens remain valid.
     collector.request(
         "POST",
         "/api/v1/agent/samples",
         sample("smoke-worker-1", now + timedelta(seconds=3), 70),
         agent_headers,
-        401,
     )
-    print("完整 API 冒烟流程通过")
+    print("申请、审批、采集、容器代次与资源禁用冒烟流程通过")
     return 0
 
 
