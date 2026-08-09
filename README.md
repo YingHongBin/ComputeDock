@@ -65,7 +65,16 @@ chmod +x create_container.sh
 ./create_container.sh
 ```
 
-脚本启动时会显示宿主机 GPU、CPU、内存的静态容量，以及运行中容器的 GPU/CPU 绑定、内存上限和共享内存配置，不采集实时使用率。随后依次输入 GPU（可留空）、CPU 核、内存上限、SSH 端口、容器用户、密码、宿主机挂载目录、容器名、镜像、Agent 运行模式和采集间隔。Agent 名称自动使用 Docker 容器名。
+镜像和数据根目录的默认值来自执行脚本时当前目录下的 `create_container.conf`：
+
+```ini
+IMAGE_DEFAULT=dilab-base:cuda-12.8-v5
+DATA_ROOT_DEFAULT=/data
+```
+
+配置文件为必需项；当前执行目录中不存在 `create_container.conf` 时，脚本会报错退出。配置文件只接受上述两个 `KEY=VALUE` 配置项，不会作为 Shell 代码执行。可通过 `COMPUTEDOCK_CONFIG_FILE` 指定其他配置文件；单次执行还可使用 `COMPUTEDOCK_DEFAULT_IMAGE` 和 `COMPUTEDOCK_DATA_ROOT` 覆盖文件中的默认值。
+
+脚本启动时会显示宿主机 GPU、CPU、内存的静态容量，以及运行中容器的 GPU/CPU 绑定、内存上限和共享内存配置，不采集实时使用率。随后依次输入 GPU（可留空）、CPU 核、内存上限、SSH 端口、容器用户、密码、容器名、宿主机数据根目录、镜像、Agent 运行模式和采集间隔。Agent 名称自动使用 Docker 容器名。
 
 GPU 留空时，脚本会显式设置 `NVIDIA_VISIBLE_DEVICES=void`，确保 CUDA 基础镜像或 Docker 的 NVIDIA 默认运行时不会让容器看到宿主机 GPU。Agent 仍会正常运行并通过健康检查，但会静默跳过 GPU 采集。修复前以 GPU 留空方式创建的容器不会自动更新，需要删除并重新创建后才能获得该隔离配置。
 
@@ -79,12 +88,12 @@ CPU 核会自动排序、去重并合并连续区间，例如 `3,2,2,1,8,7` 会�
 
 执行前脚本会：
 
-- 校验 GPU/CPU、端口、挂载目录、容器名和本地镜像；
+- 校验 GPU/CPU、端口、数据根目录、容器名和本地镜像；
 - 再次检查所选 GPU/CPU 是否与运行中容器重叠；
 - 显示包含明文密码和 Token 的完整命令，并在确认后创建容器；
 - 检查容器是否保持运行，并等待 SSH 和 Agent 都进入健康状态；失败时显示 Supervisor 状态和容器日志，并保留容器供排查。
 
-内存只需输入 GiB 数值，例如输入 `256` 会生成 `-m 256G`、`--memory-swap 256G`，并自动将 `--shm-size` 设置为内存的一半。SSH 宿主机端口和宿主机挂载目录必须手动输入，且挂载目录需要提前创建。
+内存只需输入 GiB 数值，例如输入 `256` 会生成 `-m 256G`、`--memory-swap 256G`，并自动将 `--shm-size` 设置为内存的一半。SSH 宿主机端口必须手动输入。最终挂载目录固定为 `<数据根目录>/<容器名称>`；确认创建后，脚本会自动创建该目录，并将目录 owner 修改为 `1001:1001`。该 UID/GID 是宿主机挂载目录与容器交互用户之间的固定契约，不属于外部配置；容器启动时会校验交互用户的实际 UID/GID，不匹配则拒绝启动。非 root 用户执行时需要可用的 `sudo` 权限；最终确认后，脚本会通过 `sudo -v` 在当前终端交互认证一次，再执行目录创建和 owner 修改。
 
 密码和 Agent Token 采用明文输入，并会出现在配置摘要和命令预览中。脚本执行时仍通过临时环境变量传入 Docker；容器管理员也可从容器配置中查看 `NEW_PWD` 和 `COMPUTEDOCK_TOKEN`。
 

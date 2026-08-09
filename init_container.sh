@@ -6,6 +6,8 @@ set -o pipefail
 readonly AGENT_STATE_DIR="/var/lib/computedock-agent"
 readonly AGENT_RUNTIME_DIR="/run/computedock-agent"
 readonly SUPERVISOR_CONFIG="/etc/supervisor/supervisord.conf"
+readonly DEFAULT_UID="1001"
+readonly DEFAULT_GID="1001"
 
 die() {
     printf '[ERROR] %s\n' "$*" >&2
@@ -48,6 +50,13 @@ export COMPUTEDOCK_STATE_DIR="$AGENT_STATE_DIR"
 if ! id -u "$NEW_USER" >/dev/null 2>&1; then
     useradd -m -U -G sudo -s /bin/bash "$NEW_USER" \
         || die "Failed to create interactive user: ${NEW_USER}"
+fi
+interactive_uid=$(id -u "$NEW_USER") \
+    || die "Cannot determine UID for interactive user: ${NEW_USER}"
+interactive_gid=$(id -g "$NEW_USER") \
+    || die "Cannot determine primary GID for interactive user: ${NEW_USER}"
+if [[ "$interactive_uid" != "$DEFAULT_UID" || "$interactive_gid" != "$DEFAULT_GID" ]]; then
+    die "Interactive user ${NEW_USER} must use UID:GID ${DEFAULT_UID}:${DEFAULT_GID}; got ${interactive_uid}:${interactive_gid}"
 fi
 printf '%s:%s\n' "$NEW_USER" "$NEW_PWD" | chpasswd \
     || die "Failed to set the password for ${NEW_USER}"

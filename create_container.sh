@@ -3,10 +3,14 @@
 set -u
 set -o pipefail
 
-readonly IMAGE_DEFAULT="dilab-base:cuda-12.8-v5"
+readonly CONFIG_FILE_DEFAULT="${PWD}/create_container.conf"
+readonly DEFAULT_UID="1001"
+readonly DEFAULT_GID="1001"
 readonly AGENT_TEST_OUTPUT_PATH="/opt/computedock-agent/test-samples.jsonl"
 readonly AGENT_SERVER_URL_DEFAULT="https://nbdataxai.com/monitor/api/v1/agent/samples"
 
+IMAGE_DEFAULT=""
+DATA_ROOT_DEFAULT=""
 password=""
 agent_token=""
 GPU_DATA=""
@@ -16,6 +20,7 @@ HOST_MEM_TOTAL_KIB=""
 AGENT_SERVER_URL="$AGENT_SERVER_URL_DEFAULT"
 AGENT_INTERVAL=""
 AGENT_MODE="report"
+DATA_ROOT=""
 
 info() {
     printf '[INFO] %s\n' "$*"
@@ -188,6 +193,61 @@ format_bytes() {
 
 trim_whitespace() {
     sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+load_configuration() {
+    local config_file="${COMPUTEDOCK_CONFIG_FILE:-$CONFIG_FILE_DEFAULT}"
+    local raw_line line key value
+    local configured_image="" configured_data_root=""
+    local image_seen=0 data_root_seen=0
+
+    [[ -e "$config_file" ]] \
+        || die "当前执行目录缺少配置文件 '$config_file'。"
+    [[ -f "$config_file" && -r "$config_file" ]] \
+        || die "配置文件 '$config_file' 不是可读的普通文件。"
+
+    while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
+        line=$(printf '%s' "$raw_line" | trim_whitespace)
+        [[ -z "$line" || "$line" == \#* ]] && continue
+        [[ "$line" == *=* ]] \
+            || die "配置文件 '$config_file' 包含无效行：$raw_line"
+        key=$(printf '%s' "${line%%=*}" | trim_whitespace)
+        value=$(printf '%s' "${line#*=}" | trim_whitespace)
+        [[ -n "$value" ]] \
+            || die "配置项 '$key' 不能为空。"
+        case "$key" in
+            IMAGE_DEFAULT)
+                (( image_seen == 0 )) \
+                    || die "配置项 IMAGE_DEFAULT 不能重复。"
+                configured_image="$value"
+                image_seen=1
+                ;;
+            DATA_ROOT_DEFAULT)
+                (( data_root_seen == 0 )) \
+                    || die "配置项 DATA_ROOT_DEFAULT 不能重复。"
+                configured_data_root="$value"
+                data_root_seen=1
+                ;;
+            *) die "不支持的配置项 '$key'。" ;;
+        esac
+    done < "$config_file"
+
+    IMAGE_DEFAULT="${COMPUTEDOCK_DEFAULT_IMAGE:-$configured_image}"
+    DATA_ROOT_DEFAULT="${COMPUTEDOCK_DATA_ROOT:-$configured_data_root}"
+    [[ -n "$IMAGE_DEFAULT" ]] \
+        || die "配置文件必须提供 IMAGE_DEFAULT。"
+    [[ ! "$IMAGE_DEFAULT" =~ [[:space:]] ]] \
+        || die "IMAGE_DEFAULT 不能包含空白字符。"
+    while [[ "$DATA_ROOT_DEFAULT" != "/" && "$DATA_ROOT_DEFAULT" == */ ]]; do
+        DATA_ROOT_DEFAULT="${DATA_ROOT_DEFAULT%/}"
+    done
+    [[ "$DATA_ROOT_DEFAULT" == /* ]] \
+        || die "DATA_ROOT_DEFAULT 必须是绝对路径。"
+    [[ "$DATA_ROOT_DEFAULT" != "/" ]] \
+        || die "DATA_ROOT_DEFAULT 不能是宿主机根目录。"
+    [[ ! -e "$DATA_ROOT_DEFAULT" || -d "$DATA_ROOT_DEFAULT" ]] \
+        || die "DATA_ROOT_DEFAULT '$DATA_ROOT_DEFAULT' 已存在，但不是目录。"
+    readonly IMAGE_DEFAULT DATA_ROOT_DEFAULT
 }
 
 gpu_uuid_to_index() {
@@ -449,20 +509,63 @@ prompt_agent_token() {
     done
 }
 
-prompt_mount_path() {
+prompt_data_root() {
     local value
     while true; do
-        printf '宿主机挂载目录（绝对路径）: '
+        printf '宿主机数据根目录 [%s]: ' "$DATA_ROOT_DEFAULT"
         IFS= read -r value || exit 1
+        [[ -n "$value" ]] || value="$DATA_ROOT_DEFAULT"
+        while [[ "$value" != "/" && "$value" == */ ]]; do
+            value="${value%/}"
+        done
         if [[ "$value" != /* ]]; then
-            warn "挂载目录必须是绝对路径。"
-        elif [[ ! -d "$value" ]]; then
-            warn "目录 '$value' 不存在，请先创建后再输入。"
+            warn "数据根目录必须是绝对路径。"
+        elif [[ "$value" == "/" ]]; then
+            warn "数据根目录不能是宿主机根目录。"
+        elif [[ -e "$value" && ! -d "$value" ]]; then
+            warn "数据根目录 '$value' 已存在，但不是目录。"
+        elif [[ -L "${value}/${CONTAINER_NAME}" ]]; then
+            warn "容器数据目录 '${value}/${CONTAINER_NAME}' 不能是符号链接。"
+        elif [[ -e "${value}/${CONTAINER_NAME}" && ! -d "${value}/${CONTAINER_NAME}" ]]; then
+            warn "容器数据目录 '${value}/${CONTAINER_NAME}' 已存在，但不是目录。"
         else
-            MOUNT_PATH="$value"
+            DATA_ROOT="$value"
+            MOUNT_PATH="${DATA_ROOT}/${CONTAINER_NAME}"
             return
         fi
     done
+}
+
+run_as_root() {
+    if (( EUID == 0 )); then
+        "$@"
+        return
+    fi
+    command -v sudo >/dev/null 2>&1 \
+        || die "创建容器数据目录并修改 owner 需要 root 权限或 sudo。"
+    sudo -- "$@"
+}
+
+request_root_access() {
+    (( EUID != 0 )) || return
+    command -v sudo >/dev/null 2>&1 \
+        || die "创建容器数据目录并修改 owner 需要 root 权限或 sudo。"
+    info "创建容器数据目录并修改 owner 需要 sudo 权限，请按提示完成认证。"
+    sudo -v \
+        || die "sudo 认证失败，无法准备容器数据目录。"
+}
+
+prepare_mount_path() {
+    if [[ -L "$MOUNT_PATH" ]]; then
+        die "容器数据目录 '$MOUNT_PATH' 不能是符号链接。"
+    fi
+    if [[ -e "$MOUNT_PATH" && ! -d "$MOUNT_PATH" ]]; then
+        die "容器数据目录 '$MOUNT_PATH' 已存在，但不是目录。"
+    fi
+    run_as_root mkdir -p -- "$MOUNT_PATH" \
+        || die "无法创建容器数据目录 '$MOUNT_PATH'。"
+    run_as_root chown "${DEFAULT_UID}:${DEFAULT_GID}" -- "$MOUNT_PATH" \
+        || die "无法将容器数据目录 '$MOUNT_PATH' 的 owner 修改为 ${DEFAULT_UID}:${DEFAULT_GID}。"
 }
 
 prompt_memory() {
@@ -691,6 +794,7 @@ show_configuration() {
     printf '内存: %sG\n' "$MEMORY_GIB"
     printf '共享内存: %sM\n' "$SHM_MIB"
     printf 'SSH 端口: %s -> 22\n' "$SSH_PORT"
+    printf '数据根目录: %s\n' "$DATA_ROOT"
     printf '挂载: %s -> /home/%s\n' "$MOUNT_PATH" "$USERNAME_VALUE"
     printf 'Agent 名称: %s\n' "$CONTAINER_NAME"
     printf 'Agent 运行模式: %s\n' "$AGENT_MODE"
@@ -807,6 +911,7 @@ create_container() {
 }
 
 main() {
+    load_configuration
     require_interactive_terminal
     check_prerequisites
     detect_host_resources
@@ -818,8 +923,8 @@ main() {
     prompt_port
     prompt_username
     prompt_password
-    prompt_mount_path
     prompt_container_name
+    prompt_data_root
     prompt_image
     prompt_agent_mode
     prompt_agent_interval
@@ -848,6 +953,8 @@ main() {
     docker image inspect "$IMAGE_VALUE" >/dev/null 2>&1 || die "镜像 '$IMAGE_VALUE' 在交互期间已不可用。"
 
     confirm "确认创建并启动容器吗？" || die "操作已取消。"
+    request_root_access
+    prepare_mount_path
     create_container
 }
 

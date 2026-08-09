@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import shlex
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -25,6 +27,158 @@ class DockerAgentModeTests(unittest.TestCase):
             result.stdout.strip(),
             "https://nbdataxai.com/monitor/api/v1/agent/samples",
         )
+
+    def test_creation_script_loads_defaults_from_config(self) -> None:
+        command = r'''
+            source create_container.sh
+            load_configuration
+            printf '%s\n' "$IMAGE_DEFAULT" "$DATA_ROOT_DEFAULT"
+        '''
+        result = subprocess.run(
+            ["bash", "-c", command],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.stdout.splitlines(),
+            ["dilab-base:cuda-12.8-v5", "/data"],
+        )
+
+    def test_environment_can_override_config_defaults(self) -> None:
+        command = r'''
+            source create_container.sh
+            COMPUTEDOCK_DEFAULT_IMAGE="computedock:override"
+            COMPUTEDOCK_DATA_ROOT="/srv/override/"
+            load_configuration
+            printf '%s\n' "$IMAGE_DEFAULT" "$DATA_ROOT_DEFAULT"
+        '''
+        result = subprocess.run(
+            ["bash", "-c", command],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.stdout.splitlines(),
+            ["computedock:override", "/srv/override"],
+        )
+
+    def test_default_config_is_resolved_from_execution_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            execution_directory = Path(directory)
+            (execution_directory / "create_container.conf").write_text(
+                "IMAGE_DEFAULT=computedock:from-cwd\n"
+                "DATA_ROOT_DEFAULT=/srv/from-cwd\n",
+                encoding="utf-8",
+            )
+            script = shlex.quote(str(PROJECT_ROOT / "create_container.sh"))
+            command = f'''
+                source {script}
+                load_configuration
+                printf '%s\n' "$IMAGE_DEFAULT" "$DATA_ROOT_DEFAULT"
+            '''
+            result = subprocess.run(
+                ["bash", "-c", command],
+                cwd=execution_directory,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(
+            result.stdout.splitlines(),
+            ["computedock:from-cwd", "/srv/from-cwd"],
+        )
+
+    def test_missing_config_in_execution_directory_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            script = shlex.quote(str(PROJECT_ROOT / "create_container.sh"))
+            command = f'''\
+                source {script}
+                load_configuration
+            '''
+            result = subprocess.run(
+                ["bash", "-c", command],
+                cwd=directory,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("当前执行目录缺少配置文件", result.stderr)
+
+    def test_mount_path_uses_data_root_and_container_name(self) -> None:
+        command = r'''
+            source create_container.sh
+            CONTAINER_NAME="worker-01"
+            prompt_data_root <<< "/srv/compute/"
+            printf '\n%s\n%s\n' "$DATA_ROOT" "$MOUNT_PATH"
+        '''
+        result = subprocess.run(
+            ["bash", "-c", command],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.stdout.splitlines()[-2:],
+            ["/srv/compute", "/srv/compute/worker-01"],
+        )
+
+    def test_mount_path_is_created_and_owned_by_1001(self) -> None:
+        command = r'''
+            source create_container.sh
+            MOUNT_PATH="/data/worker-01"
+            run_as_root() {
+                printf '%s\n' "$*"
+            }
+            prepare_mount_path
+        '''
+        result = subprocess.run(
+            ["bash", "-c", command],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [
+                "mkdir -p -- /data/worker-01",
+                "chown 1001:1001 -- /data/worker-01",
+            ],
+        )
+
+    def test_mount_owner_matches_the_container_user_contract(self) -> None:
+        creation_script = (PROJECT_ROOT / "create_container.sh").read_text(
+            encoding="utf-8"
+        )
+        entrypoint = (PROJECT_ROOT / "init_container.sh").read_text(encoding="utf-8")
+
+        for content in (creation_script, entrypoint):
+            self.assertIn('readonly DEFAULT_UID="1001"', content)
+            self.assertIn('readonly DEFAULT_GID="1001"', content)
+        self.assertIn('interactive_uid=$(id -u "$NEW_USER")', entrypoint)
+        self.assertIn('interactive_gid=$(id -g "$NEW_USER")', entrypoint)
+        self.assertIn(
+            "must use UID:GID ${DEFAULT_UID}:${DEFAULT_GID}", entrypoint
+        )
+
+    def test_sudo_authentication_precedes_mount_preparation(self) -> None:
+        creation_script = (PROJECT_ROOT / "create_container.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("sudo -v", creation_script)
+        confirmation = creation_script.index(
+            'confirm "确认创建并启动容器吗？"'
+        )
+        authentication = creation_script.index("request_root_access", confirmation)
+        preparation = creation_script.index("prepare_mount_path", authentication)
+        self.assertLess(confirmation, authentication)
+        self.assertLess(authentication, preparation)
 
     def build_docker_arguments(
         self, mode: str, gpu_selection: str = ""
