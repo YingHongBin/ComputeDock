@@ -610,9 +610,13 @@ prepare_mount_path() {
     if [[ -L "$MOUNT_PATH" ]]; then
         die "容器数据目录 '$MOUNT_PATH' 不能是符号链接。"
     fi
-    if [[ -e "$MOUNT_PATH" && ! -d "$MOUNT_PATH" ]]; then
-        die "容器数据目录 '$MOUNT_PATH' 已存在，但不是目录。"
+    if [[ -e "$MOUNT_PATH" ]]; then
+        [[ -d "$MOUNT_PATH" ]] \
+            || die "容器数据目录 '$MOUNT_PATH' 已存在，但不是目录。"
+        return
     fi
+
+    request_root_access
     run_as_root mkdir -p -- "$MOUNT_PATH" \
         || die "无法创建容器数据目录 '$MOUNT_PATH'。"
     run_as_root chown "${DEFAULT_UID}:${DEFAULT_GID}" -- "$MOUNT_PATH" \
@@ -1069,7 +1073,6 @@ main() {
     docker image inspect "$IMAGE_VALUE" >/dev/null 2>&1 || die "镜像 '$IMAGE_VALUE' 在交互期间已不可用。"
 
     confirm "确认创建并启动容器吗？" || die "操作已取消。"
-    request_root_access
     prepare_mount_path
     create_container
 }

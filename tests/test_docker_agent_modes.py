@@ -31,6 +31,7 @@ class DockerAgentModeTests(unittest.TestCase):
     def test_creation_script_loads_defaults_from_config(self) -> None:
         command = r'''
             source create_container.sh
+            COMPUTEDOCK_CONFIG_FILE=create_container.conf.example
             load_configuration
             printf '%s\n' "$IMAGE_DEFAULT" "$DATA_ROOT_DEFAULT" "$SSH_PORT_RANGE"
         '''
@@ -49,6 +50,7 @@ class DockerAgentModeTests(unittest.TestCase):
     def test_environment_can_override_config_defaults(self) -> None:
         command = r'''
             source create_container.sh
+            COMPUTEDOCK_CONFIG_FILE=create_container.conf.example
             COMPUTEDOCK_DEFAULT_IMAGE="computedock:override"
             COMPUTEDOCK_DATA_ROOT="/srv/override/"
             load_configuration
@@ -267,28 +269,62 @@ class DockerAgentModeTests(unittest.TestCase):
         )
 
     def test_mount_path_is_created_and_owned_by_1001(self) -> None:
-        command = r'''
-            source create_container.sh
-            MOUNT_PATH="/data/worker-01"
-            run_as_root() {
-                printf '%s\n' "$*"
-            }
-            prepare_mount_path
-        '''
-        result = subprocess.run(
-            ["bash", "-c", command],
-            cwd=PROJECT_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
+        with tempfile.TemporaryDirectory() as directory:
+            mount_path = Path(directory) / "worker-01"
+            quoted_mount_path = shlex.quote(str(mount_path))
+            command = f'''
+                source create_container.sh
+                MOUNT_PATH={quoted_mount_path}
+                request_root_access() {{
+                    printf '%s\n' "request sudo"
+                }}
+                run_as_root() {{
+                    printf '%s\n' "$*"
+                }}
+                prepare_mount_path
+            '''
+            result = subprocess.run(
+                ["bash", "-c", command],
+                cwd=PROJECT_ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
         self.assertEqual(
             result.stdout.splitlines(),
             [
-                "mkdir -p -- /data/worker-01",
-                "chown 1001:1001 -- /data/worker-01",
+                "request sudo",
+                f"mkdir -p -- {mount_path}",
+                f"chown 1001:1001 -- {mount_path}",
             ],
         )
+
+    def test_existing_mount_path_does_not_request_sudo(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            mount_path = shlex.quote(directory)
+            command = f'''
+                source create_container.sh
+                MOUNT_PATH={mount_path}
+                request_root_access() {{
+                    printf '%s\n' "unexpected sudo"
+                    return 1
+                }}
+                run_as_root() {{
+                    printf '%s\n' "unexpected command: $*"
+                    return 1
+                }}
+                prepare_mount_path
+            '''
+            result = subprocess.run(
+                ["bash", "-c", command],
+                cwd=PROJECT_ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(result.stdout, "")
 
     def test_mount_owner_matches_the_container_user_contract(self) -> None:
         creation_script = (PROJECT_ROOT / "create_container.sh").read_text(
@@ -305,18 +341,16 @@ class DockerAgentModeTests(unittest.TestCase):
             "must use UID:GID ${DEFAULT_UID}:${DEFAULT_GID}", entrypoint
         )
 
-    def test_sudo_authentication_precedes_mount_preparation(self) -> None:
+    def test_sudo_authentication_is_part_of_missing_mount_preparation(self) -> None:
         creation_script = (PROJECT_ROOT / "create_container.sh").read_text(
             encoding="utf-8"
         )
         self.assertIn("sudo -v", creation_script)
-        confirmation = creation_script.index(
-            'confirm "确认创建并启动容器吗？"'
-        )
-        authentication = creation_script.index("request_root_access", confirmation)
-        preparation = creation_script.index("prepare_mount_path", authentication)
-        self.assertLess(confirmation, authentication)
-        self.assertLess(authentication, preparation)
+        preparation = creation_script.index("prepare_mount_path()")
+        authentication = creation_script.index("request_root_access", preparation)
+        creation = creation_script.index("run_as_root mkdir", authentication)
+        self.assertLess(preparation, authentication)
+        self.assertLess(authentication, creation)
 
     def build_docker_arguments(
         self, mode: str, gpu_selection: str = ""
