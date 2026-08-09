@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from ..auth import parse_bearer
 from ..database import get_db
 from ..schemas import SampleAccepted, SampleInput
-from ..services import authenticate_resource, ingest_sample
+from ..services import authenticate_reporting_token, ingest_sample
 
 router = APIRouter(prefix="/api/v1/agent", tags=["agent"])
 
@@ -18,6 +18,6 @@ def upload_samples(
     db: Session = Depends(get_db),
 ) -> SampleAccepted:
     token = parse_bearer(authorization)
-    resource = authenticate_resource(db, token)
-    result, container = ingest_sample(db, resource, payload)
+    resource, request = authenticate_reporting_token(db, token)
+    result, container = ingest_sample(db, resource, payload, request)
     return SampleAccepted(status=result, container_id=container.id)  # type: ignore[arg-type]

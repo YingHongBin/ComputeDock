@@ -238,9 +238,7 @@ class ComputeRequest(Base):
 
     __table_args__ = (
         CheckConstraint("gpu_count > 0", name="ck_compute_requests_gpu_count"),
-        CheckConstraint(
-            "duration_days BETWEEN 1 AND 14", name="ck_compute_requests_duration_days"
-        ),
+        CheckConstraint("duration_days > 0", name="ck_compute_requests_duration_days"),
         CheckConstraint(
             "approval_status IN ('pending', 'approved', 'rejected')",
             name="ck_compute_requests_approval_status",
@@ -310,13 +308,39 @@ class ContainerInstance(Base):
     batches: Mapped[list[SampleBatch]] = relationship(back_populates="container")
 
     __table_args__ = (
-        UniqueConstraint("resource_id", "name", "generation", name="uq_container_generation"),
         Index(
-            "uq_container_active_name",
+            "uq_container_legacy_generation",
+            "resource_id",
+            "name",
+            "generation",
+            unique=True,
+            postgresql_where=text("compute_request_id IS NULL"),
+            sqlite_where=text("compute_request_id IS NULL"),
+        ),
+        Index(
+            "uq_container_request_generation",
+            "compute_request_id",
+            "name",
+            "generation",
+            unique=True,
+            postgresql_where=text("compute_request_id IS NOT NULL"),
+            sqlite_where=text("compute_request_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_container_legacy_active_name",
             "resource_id",
             "name",
             unique=True,
-            postgresql_where=text("removed_at IS NULL"),
+            postgresql_where=text("removed_at IS NULL AND compute_request_id IS NULL"),
+            sqlite_where=text("removed_at IS NULL AND compute_request_id IS NULL"),
+        ),
+        Index(
+            "uq_container_request_active_name",
+            "compute_request_id",
+            "name",
+            unique=True,
+            postgresql_where=text("removed_at IS NULL AND compute_request_id IS NOT NULL"),
+            sqlite_where=text("removed_at IS NULL AND compute_request_id IS NOT NULL"),
         ),
         Index("ix_container_resource_active", "resource_id", "removed_at"),
         Index("ix_container_request_active", "compute_request_id", "removed_at"),

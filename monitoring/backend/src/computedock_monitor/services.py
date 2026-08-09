@@ -10,7 +10,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .models import ComputeResource, ContainerInstance, GpuSample, SampleBatch
+from .models import ComputeRequest, ComputeResource, ContainerInstance, GpuSample, SampleBatch
 from .schemas import (
     ChartPoint,
     ChartResponse,
@@ -86,35 +86,69 @@ def validate_collection_time(collected_at: datetime, now: datetime) -> datetime:
 
 
 def authenticate_resource(db: Session, token: str) -> ComputeResource:
-    resource = db.scalar(
-        select(ComputeResource).where(
-            ComputeResource.token_hash == digest_secret(token),
-            ComputeResource.archived_at.is_(None),
-        )
-    )
-    if resource is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid resource token")
+    resource, _request = authenticate_reporting_token(db, token)
     return resource
 
 
+def authenticate_reporting_token(
+    db: Session, token: str
+) -> tuple[ComputeResource, ComputeRequest | None]:
+    token_hash = digest_secret(token)
+    request = db.scalar(
+        select(ComputeRequest).where(
+            ComputeRequest.token_hash == token_hash,
+            ComputeRequest.approval_status == "approved",
+        )
+    )
+    if request is not None:
+        resource = db.get(ComputeResource, request.resource_id)
+        if resource is None:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid reporting token")
+        return resource, request
+    resource = db.scalar(select(ComputeResource).where(ComputeResource.token_hash == token_hash))
+    if resource is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid reporting token")
+    return resource, None
+
+
 def lock_resource_lifecycle(db: Session, resource_id: uuid.UUID) -> None:
+    if db.bind is None or db.bind.dialect.name != "postgresql":
+        return
     db.execute(
         text("SELECT pg_advisory_xact_lock(hashtext(:resource_id))"),
         {"resource_id": str(resource_id)},
     )
 
 
+def start_compute_request(request: ComputeRequest, received_at: datetime) -> bool:
+    if request.started_at is not None:
+        return False
+    request.started_at = received_at
+    request.expires_at = received_at + timedelta(days=request.duration_days)
+    request.updated_at = received_at
+    return True
+
+
 def get_or_create_container(
     db: Session,
     resource: ComputeResource,
+    request: ComputeRequest | None,
     name: str,
     collected_at: datetime,
     received_at: datetime,
 ) -> ContainerInstance:
+    namespace_filters = (
+        [ContainerInstance.compute_request_id == request.id]
+        if request is not None
+        else [
+            ContainerInstance.resource_id == resource.id,
+            ContainerInstance.compute_request_id.is_(None),
+        ]
+    )
     container = db.scalar(
         select(ContainerInstance)
         .where(
-            ContainerInstance.resource_id == resource.id,
+            *namespace_filters,
             ContainerInstance.name == name,
             ContainerInstance.removed_at.is_(None),
         )
@@ -124,13 +158,14 @@ def get_or_create_container(
         return container
     generation = db.scalar(
         select(func.coalesce(func.max(ContainerInstance.generation), 0)).where(
-            ContainerInstance.resource_id == resource.id,
+            *namespace_filters,
             ContainerInstance.name == name,
         )
     )
     container = ContainerInstance(
         id=uuid.uuid4(),
         resource_id=resource.id,
+        compute_request_id=request.id if request else None,
         name=name,
         generation=int(generation or 0) + 1,
         first_reported_at=collected_at,
@@ -147,16 +182,18 @@ def ingest_sample(
     db: Session,
     resource: ComputeResource,
     payload: SampleInput,
+    request: ComputeRequest | None = None,
 ) -> tuple[str, ContainerInstance]:
     received_at = utcnow()
     collected_at = validate_collection_time(payload.collected_at, received_at)
     payload = payload.model_copy(update={"collected_at": collected_at})
     lock_resource_lifecycle(db, resource.id)
     db.refresh(resource)
-    if resource.archived_at is not None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid resource token")
+    if request is not None:
+        db.refresh(request)
+        start_compute_request(request, received_at)
     container = get_or_create_container(
-        db, resource, payload.container_name, collected_at, received_at
+        db, resource, request, payload.container_name, collected_at, received_at
     )
     payload_hash = canonical_payload_hash(payload)
     existing = db.scalar(
@@ -206,9 +243,17 @@ def ingest_sample(
         db.commit()
     except IntegrityError as exc:
         db.rollback()
+        namespace_filters = (
+            [ContainerInstance.compute_request_id == request.id]
+            if request is not None
+            else [
+                ContainerInstance.resource_id == resource.id,
+                ContainerInstance.compute_request_id.is_(None),
+            ]
+        )
         concurrent_container = db.scalar(
             select(ContainerInstance).where(
-                ContainerInstance.resource_id == resource.id,
+                *namespace_filters,
                 ContainerInstance.name == payload.container_name,
                 ContainerInstance.removed_at.is_(None),
             )

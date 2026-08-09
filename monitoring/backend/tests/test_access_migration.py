@@ -33,3 +33,12 @@ def test_access_migration_keeps_existing_sessions_compatible() -> None:
     assert "ADD COLUMN user_id" in content
     assert "UPDATE admin_sessions SET user_id = admin_id" in content
     assert "ALTER TABLE admin_sessions ALTER COLUMN admin_id DROP NOT NULL" in content
+
+
+def test_container_namespace_migration_preserves_legacy_and_request_names() -> None:
+    migration = MIGRATION.with_name("0003_request_container_scope.py")
+    content = migration.read_text(encoding="utf-8")
+    assert "uq_container_legacy_active_name" in content
+    assert "uq_container_request_active_name" in content
+    assert "WHERE compute_request_id IS NULL" in content
+    assert "WHERE removed_at IS NULL AND compute_request_id IS NOT NULL" in content

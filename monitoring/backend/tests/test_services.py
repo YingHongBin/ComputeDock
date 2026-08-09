@@ -4,13 +4,14 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi import HTTPException
 
-from computedock_monitor.models import ComputeResource, ContainerInstance
+from computedock_monitor.models import ComputeRequest, ComputeResource, ContainerInstance
 from computedock_monitor.schemas import SampleInput
 from computedock_monitor.services import (
     RANGES,
     aligned_chart_window,
     canonical_payload_hash,
     resource_card,
+    start_compute_request,
     validate_collection_time,
 )
 
@@ -80,3 +81,15 @@ def test_chart_window_aligns_to_bucket_boundaries() -> None:
     start, end = aligned_chart_window(now, timedelta(hours=1), 60)
     assert end == datetime(2026, 7, 30, 8, 19, tzinfo=UTC)
     assert start == datetime(2026, 7, 30, 7, 19, tzinfo=UTC)
+
+
+def test_compute_request_starts_once_from_first_received_report() -> None:
+    request = ComputeRequest(duration_days=7)
+    first = datetime(2026, 8, 10, 1, 2, 3, tzinfo=UTC)
+    second = first + timedelta(hours=1)
+    assert start_compute_request(request, first)
+    assert request.started_at == first
+    assert request.expires_at == first + timedelta(days=7)
+    assert not start_compute_request(request, second)
+    assert request.started_at == first
+    assert request.expires_at == first + timedelta(days=7)

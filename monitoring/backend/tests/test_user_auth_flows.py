@@ -27,8 +27,9 @@ from computedock_monitor.models import (
     RegistrationRequest,
     User,
 )
-from computedock_monitor.routers import auth, projects, resources, users
-from computedock_monitor.security import hash_password, utcnow
+from computedock_monitor.routers import auth, compute_requests, projects, resources, users
+from computedock_monitor.security import digest_secret, hash_password, utcnow
+from computedock_monitor.services import authenticate_reporting_token
 
 
 def make_test_app(monkeypatch) -> tuple[TestClient, sessionmaker[Session]]:
@@ -72,6 +73,7 @@ def make_test_app(monkeypatch) -> tuple[TestClient, sessionmaker[Session]]:
     app.include_router(auth.router)
     app.include_router(users.router)
     app.include_router(projects.router)
+    app.include_router(compute_requests.router)
     app.include_router(resources.router)
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_settings] = lambda: settings
@@ -256,7 +258,7 @@ def test_resource_tokens_are_hidden_from_regular_users(monkeypatch) -> None:
         name="legacy",
         gpu_model="A100",
         gpu_count=8,
-        token_hash=b"legacy-hash",
+        token_hash=digest_secret("cdr_legacy"),
         token="cdr_legacy",
         created_at=now,
         updated_at=now,
@@ -277,3 +279,110 @@ def test_resource_tokens_are_hidden_from_regular_users(monkeypatch) -> None:
     response = client.get("/api/v1/resources")
     assert response.status_code == 200
     assert all(item["token"] is None for item in response.json())
+    with sessions() as db:
+        token_resource, token_request = authenticate_reporting_token(db, "cdr_legacy")
+        assert token_resource.id == legacy.id
+        assert token_request is None
+
+
+def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatch) -> None:
+    client, sessions = make_test_app(monkeypatch)
+    admin = seed_admin(sessions)
+    now = utcnow()
+    applicant = User(
+        id=uuid.uuid4(),
+        username="applicant",
+        full_name="GPU Applicant",
+        email="applicant@example.test",
+        email_verified_at=now,
+        password_hash=hash_password("long-enough-user-password"),
+        role="user",
+        status="active",
+        must_bind_email=False,
+        created_at=now,
+        updated_at=now,
+    )
+    resource = ComputeResource(
+        id=uuid.uuid4(),
+        name="gpu-cluster",
+        gpu_model="H100",
+        gpu_count=8,
+        created_at=now,
+        updated_at=now,
+    )
+    project = Project(
+        id=uuid.uuid4(),
+        code="gpu-project",
+        name="GPU Project",
+        description="",
+        status="active",
+        created_by_id=admin.id,
+        created_at=now,
+        updated_at=now,
+    )
+    membership = ProjectMember(
+        project_id=project.id,
+        user_id=applicant.id,
+        added_by_id=admin.id,
+        created_at=now,
+    )
+    with sessions() as db:
+        db.add_all([applicant, resource, project, membership])
+        db.commit()
+
+    applicant_csrf = login(client, applicant.username, "long-enough-user-password")
+    response = client.post(
+        "/api/v1/compute-requests",
+        json={
+            "project_id": str(project.id),
+            "resource_id": str(resource.id),
+            "gpu_count": 2,
+            "duration_days": 7,
+        },
+        headers={"X-CSRF-Token": applicant_csrf},
+    )
+    assert response.status_code == 201, response.text
+    request_id = response.json()["id"]
+    assert response.json()["token"] is None
+
+    client.cookies.clear()
+    admin_csrf = login(client, admin.username, "long-enough-admin-password")
+    response = client.post(
+        f"/api/v1/compute-requests/{request_id}/review",
+        json={"decision": "approved"},
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["token"].startswith("cda_")
+    with sessions() as db:
+        token_resource, token_request = authenticate_reporting_token(
+            db, response.json()["token"]
+        )
+        assert token_resource.id == resource.id
+        assert token_request is not None
+        assert str(token_request.id) == request_id
+
+    client.cookies.clear()
+    applicant_csrf = login(client, applicant.username, "long-enough-user-password")
+    response = client.get(f"/api/v1/compute-requests/{request_id}")
+    assert response.json()["token"] is None
+    response = client.post(
+        f"/api/v1/compute-requests/{request_id}/changes",
+        json={"change_type": "extend", "amount": 14},
+        headers={"X-CSRF-Token": applicant_csrf},
+    )
+    assert response.status_code == 201, response.text
+    change_id = response.json()["id"]
+
+    client.cookies.clear()
+    admin_csrf = login(client, admin.username, "long-enough-admin-password")
+    response = client.post(
+        f"/api/v1/compute-requests/{request_id}/changes/{change_id}/review",
+        json={"decision": "approved"},
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert response.status_code == 200, response.text
+    with sessions() as db:
+        request = db.get(ComputeRequest, uuid.UUID(request_id))
+        assert request is not None
+        assert request.duration_days == 21

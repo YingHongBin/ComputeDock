@@ -169,6 +169,63 @@ class ProjectView(BaseModel):
     created_at: datetime
 
 
+class ComputeRequestInput(BaseModel):
+    project_id: uuid.UUID
+    resource_id: uuid.UUID
+    gpu_count: int = Field(gt=0)
+    duration_days: int = Field(ge=1, le=14)
+
+
+class ComputeRequestChangeInput(BaseModel):
+    change_type: Literal["extend", "expand", "release"]
+    amount: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_extension_days(self):
+        if self.change_type == "extend" and self.amount > 14:
+            raise ValueError("extension days must be between 1 and 14")
+        return self
+
+
+class ComputeRequestChangeView(BaseModel):
+    id: uuid.UUID
+    change_type: Literal["extend", "expand", "release"]
+    amount: int
+    approval_status: Literal["pending", "approved", "rejected"]
+    before_value: int
+    after_value: int
+    reviewer_name: str | None
+    review_comment: str | None
+    reviewed_at: datetime | None
+    created_at: datetime
+
+
+class ComputeRequestView(BaseModel):
+    id: uuid.UUID
+    applicant_id: uuid.UUID
+    applicant_username: str
+    applicant_name: str
+    project_id: uuid.UUID
+    project_code: str
+    project_name: str
+    resource_id: uuid.UUID
+    resource_name: str
+    gpu_count: int
+    duration_days: int
+    approval_status: Literal["pending", "approved", "rejected"]
+    runtime_status: Literal["not_started", "running", "expiring", "expired"] | None
+    actual_gpu_count: int
+    over_quota: bool
+    reviewer_name: str | None
+    review_comment: str | None
+    reviewed_at: datetime | None
+    token: str | None
+    started_at: datetime | None
+    expires_at: datetime | None
+    created_at: datetime
+    changes: list[ComputeRequestChangeView]
+
+
 class ResourceInput(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     gpu_model: str = Field(min_length=1, max_length=200)
