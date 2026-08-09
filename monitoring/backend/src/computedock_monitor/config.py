@@ -29,6 +29,9 @@ class Settings(DatabaseSettings):
     smtp_password: str = ""
     smtp_from_address: str = ""
     smtp_starttls: bool = True
+    smtp_ssl: bool = False
+    worker_poll_seconds: int = 60
+    mail_max_attempts: int = 5
 
     @property
     def allowed_origin_list(self) -> list[str]:

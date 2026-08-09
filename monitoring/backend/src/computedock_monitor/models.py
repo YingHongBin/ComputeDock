@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -483,3 +484,11 @@ class AuditEvent(Base):
         Index("ix_audit_events_object", "object_type", "object_id", "created_at"),
         Index("ix_audit_events_actor_created", "actor_id", "created_at"),
     )
+
+
+class WorkerCheckpoint(Base):
+    __tablename__ = "worker_checkpoints"
+
+    name: Mapped[str] = mapped_column(String(100), primary_key=True)
+    completed_through: Mapped[date | None] = mapped_column(Date)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

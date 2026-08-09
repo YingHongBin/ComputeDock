@@ -226,6 +226,48 @@ class ComputeRequestView(BaseModel):
     changes: list[ComputeRequestChangeView]
 
 
+class HistoryContainerView(BaseModel):
+    id: uuid.UUID
+    name: str
+    generation: int
+    status: Literal["online", "offline", "removed"]
+    applicant_id: uuid.UUID
+    applicant_name: str
+    project_id: uuid.UUID
+    project_name: str
+    resource_id: uuid.UUID
+    resource_name: str
+    compute_request_id: uuid.UUID
+    first_reported_at: datetime
+    last_received_at: datetime
+    removed_at: datetime | None
+    expires_at: datetime | None
+
+
+class HourlyHistoryPoint(BaseModel):
+    time: datetime
+    utilization_avg: float
+    utilization_max: int
+    memory_used_avg: float
+    memory_used_max: int
+    memory_total: int
+    online_seconds: int
+    sample_count: int
+
+
+class HourlyHistorySeries(BaseModel):
+    gpuid: str
+    points: list[HourlyHistoryPoint]
+
+
+class HistoryContainerChart(BaseModel):
+    container_id: uuid.UUID
+    container_name: str
+    first_reported_at: datetime
+    removed_at: datetime
+    series: list[HourlyHistorySeries]
+
+
 class ResourceInput(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     gpu_model: str = Field(min_length=1, max_length=200)

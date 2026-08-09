@@ -21,13 +21,22 @@ from computedock_monitor.models import (
     ComputeResource,
     ContainerInstance,
     EmailActionToken,
+    HourlyGpuRollup,
     NotificationOutbox,
     Project,
     ProjectMember,
     RegistrationRequest,
     User,
+    WorkerCheckpoint,
 )
-from computedock_monitor.routers import auth, compute_requests, projects, resources, users
+from computedock_monitor.routers import (
+    auth,
+    compute_requests,
+    history,
+    projects,
+    resources,
+    users,
+)
 from computedock_monitor.security import digest_secret, hash_password, utcnow
 from computedock_monitor.services import authenticate_reporting_token
 
@@ -52,8 +61,10 @@ def make_test_app(monkeypatch) -> tuple[TestClient, sessionmaker[Session]]:
             ComputeRequest.__table__,
             ComputeRequestChange.__table__,
             ContainerInstance.__table__,
+            HourlyGpuRollup.__table__,
             NotificationOutbox.__table__,
             AuditEvent.__table__,
+            WorkerCheckpoint.__table__,
         ],
     )
     sessions = sessionmaker(bind=engine, expire_on_commit=False)
@@ -74,6 +85,7 @@ def make_test_app(monkeypatch) -> tuple[TestClient, sessionmaker[Session]]:
     app.include_router(users.router)
     app.include_router(projects.router)
     app.include_router(compute_requests.router)
+    app.include_router(history.router)
     app.include_router(resources.router)
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_settings] = lambda: settings
@@ -386,3 +398,45 @@ def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatc
         request = db.get(ComputeRequest, uuid.UUID(request_id))
         assert request is not None
         assert request.duration_days == 21
+        container = ContainerInstance(
+            id=uuid.uuid4(),
+            resource_id=resource.id,
+            compute_request_id=request.id,
+            name="worker-01",
+            generation=1,
+            first_reported_at=now,
+            last_received_at=now,
+            latest_collected_at=now,
+            current_gpu_ids=["GPU-1"],
+            removed_at=now,
+        )
+        db.add(container)
+        db.flush()
+        db.add(
+            HourlyGpuRollup(
+                id=1,
+                bucket_start=now,
+                resource_id=resource.id,
+                compute_request_id=request.id,
+                container_id=container.id,
+                gpuid="GPU-1",
+                utilization_avg=40.0,
+                utilization_max=80,
+                memory_used_avg=1024.0,
+                memory_used_max=2048,
+                memory_total=81920,
+                online_seconds=3500,
+                sample_count=240,
+                first_collected_at=now,
+                last_collected_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        db.commit()
+    response = client.get(f"/api/v1/history/containers?user_id={applicant.id}")
+    assert response.status_code == 200, response.text
+    assert response.json()[0]["name"] == "worker-01"
+    response = client.get(f"/api/v1/history/containers/{container.id}/chart")
+    assert response.status_code == 200, response.text
+    assert response.json()["series"][0]["points"][0]["utilization_max"] == 80
