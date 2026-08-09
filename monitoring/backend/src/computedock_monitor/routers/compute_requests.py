@@ -348,6 +348,11 @@ def create_compute_request_change(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "compute request not found")
     if request.approval_status != "approved":
         raise HTTPException(status.HTTP_409_CONFLICT, "compute request is not approved")
+    if request.started_at is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "compute request has not started reporting",
+        )
     if request.expires_at is not None and as_utc(request.expires_at) <= utcnow():
         raise HTTPException(status.HTTP_409_CONFLICT, "compute request has expired")
     applicant, project, resource = request_relations(db, request)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Generator
+from datetime import timedelta
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -423,6 +424,7 @@ def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatc
     )
     assert response.status_code == 200, response.text
     assert response.json()["token"].startswith("cda_")
+    approved_token = response.json()["token"]
     with sessions() as db:
         token_resource, token_request = authenticate_reporting_token(
             db, response.json()["token"]
@@ -440,8 +442,32 @@ def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatc
         json={"change_type": "extend", "amount": 14},
         headers={"X-CSRF-Token": applicant_csrf},
     )
+    assert response.status_code == 409
+    with sessions() as db:
+        request = db.get(ComputeRequest, uuid.UUID(request_id))
+        assert request is not None
+        request.started_at = now
+        request.expires_at = now + timedelta(days=request.duration_days)
+        db.commit()
+    response = client.post(
+        f"/api/v1/compute-requests/{request_id}/changes",
+        json={"change_type": "extend", "amount": 14},
+        headers={"X-CSRF-Token": applicant_csrf},
+    )
     assert response.status_code == 201, response.text
     change_id = response.json()["id"]
+    pending_response = client.post(
+        "/api/v1/compute-requests",
+        json={
+            "project_id": str(project.id),
+            "resource_id": str(resource.id),
+            "gpu_count": 1,
+            "duration_days": 1,
+        },
+        headers={"X-CSRF-Token": applicant_csrf},
+    )
+    assert pending_response.status_code == 201, pending_response.text
+    pending_request_id = pending_response.json()["id"]
 
     client.cookies.clear()
     admin_csrf = login(client, admin.username, "long-enough-admin-password")
@@ -497,3 +523,79 @@ def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatc
     response = client.get(f"/api/v1/history/containers/{container.id}/chart")
     assert response.status_code == 200, response.text
     assert response.json()["series"][0]["points"][0]["utilization_max"] == 80
+
+    response = client.patch(
+        f"/api/v1/users/{applicant.id}",
+        json={"status": "disabled"},
+        headers={"X-CSRF-Token": admin_csrf},
+    )
+    assert response.status_code == 200, response.text
+    response = client.get(f"/api/v1/compute-requests/{pending_request_id}")
+    assert response.json()["approval_status"] == "rejected"
+    assert response.json()["review_comment"] == "关联用户已禁用"
+    assert client.post(
+        f"/api/v1/projects/{project.id}/disable",
+        headers={"X-CSRF-Token": admin_csrf},
+    ).status_code == 200
+    assert client.post(
+        f"/api/v1/resources/{resource.id}/disable",
+        headers={"X-CSRF-Token": admin_csrf},
+    ).status_code == 200
+    with sessions() as db:
+        token_resource, token_request = authenticate_reporting_token(db, approved_token)
+        assert token_resource.id == resource.id
+        assert token_request is not None
+        assert str(token_request.id) == request_id
+
+
+def test_admin_can_approve_own_compute_request(monkeypatch) -> None:
+    client, sessions = make_test_app(monkeypatch)
+    admin = seed_admin(sessions)
+    now = utcnow()
+    resource = ComputeResource(
+        id=uuid.uuid4(),
+        name="self-review-cluster",
+        gpu_model="H100",
+        gpu_count=2,
+        created_at=now,
+        updated_at=now,
+    )
+    project = Project(
+        id=uuid.uuid4(),
+        code="self-review-project",
+        name="Self Review Project",
+        description="",
+        status="active",
+        created_by_id=admin.id,
+        created_at=now,
+        updated_at=now,
+    )
+    membership = ProjectMember(
+        project_id=project.id,
+        user_id=admin.id,
+        added_by_id=admin.id,
+        created_at=now,
+    )
+    with sessions() as db:
+        db.add_all([resource, project, membership])
+        db.commit()
+
+    csrf = login(client, admin.username, "long-enough-admin-password")
+    response = client.post(
+        "/api/v1/compute-requests",
+        json={
+            "project_id": str(project.id),
+            "resource_id": str(resource.id),
+            "gpu_count": 1,
+            "duration_days": 1,
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert response.status_code == 201, response.text
+    response = client.post(
+        f"/api/v1/compute-requests/{response.json()['id']}/review",
+        json={"decision": "approved"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["token"].startswith("cda_")

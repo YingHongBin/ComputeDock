@@ -143,7 +143,7 @@ export function RequestsPage() {
           {session?.role === 'admin' && row.token && (
             <Button size="small" icon={<CopyOutlined />} onClick={() => void copyToken(row.token!)}>复制 Token</Button>
           )}
-          {row.applicant_username === session?.username && row.approval_status === 'approved' && row.runtime_status !== 'expired' && !row.changes.some((item) => item.approval_status === 'pending') && (
+          {row.applicant_username === session?.username && row.approval_status === 'approved' && row.runtime_status !== 'not_started' && row.runtime_status !== 'expired' && !row.changes.some((item) => item.approval_status === 'pending') && (
             <Button size="small" onClick={() => setChangeTarget(row)}>申请变更</Button>
           )}
         </Space>
