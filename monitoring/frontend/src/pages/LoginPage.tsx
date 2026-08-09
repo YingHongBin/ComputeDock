@@ -1,5 +1,5 @@
 import { LockOutlined, UserOutlined } from '@ant-design/icons'
-import { Alert, Button, Card, Form, Input, Typography } from 'antd'
+import { Alert, Button, Card, Flex, Form, Input, Typography } from 'antd'
 import { useState } from 'react'
 import { errorMessage } from '../api'
 import { useAuth } from '../auth'
@@ -32,14 +32,18 @@ export function LoginPage() {
         <Typography.Paragraph type="secondary">算力资源监控管理平台</Typography.Paragraph>
         {error && <Alert type="error" message={error} showIcon className="login-error" />}
         <Form layout="vertical" onFinish={submit} requiredMark={false}>
-          <Form.Item name="username" rules={[{ required: true, message: '请输入管理员账号' }]}>
-            <Input prefix={<UserOutlined />} size="large" placeholder="管理员账号" />
+          <Form.Item name="username" rules={[{ required: true, message: '请输入用户名' }]}>
+            <Input prefix={<UserOutlined />} size="large" placeholder="用户名" />
           </Form.Item>
           <Form.Item name="password" rules={[{ required: true, message: '请输入密码' }]}>
             <Input.Password prefix={<LockOutlined />} size="large" placeholder="密码" />
           </Form.Item>
           <Button type="primary" htmlType="submit" size="large" block loading={submitting}>登录</Button>
         </Form>
+        <Flex justify="space-between" className="login-links">
+          <Button type="link" onClick={() => navigate('/register')}>注册账号</Button>
+          <Button type="link" onClick={() => navigate('/forgot-password')}>忘记密码</Button>
+        </Flex>
       </Card>
     </main>
   )

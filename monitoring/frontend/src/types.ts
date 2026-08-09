@@ -1,5 +1,10 @@
 export interface AdminSession {
   username: string
+  full_name: string
+  email: string | null
+  email_verified: boolean
+  must_bind_email: boolean
+  role: 'admin' | 'user'
   csrf_token: string
 }
 
@@ -11,7 +16,8 @@ export interface ResourceCardData {
   allocated_gpu_count: number
   available_gpu_count: number
   overallocated: boolean
-  token: string
+  status: 'active' | 'disabled'
+  token: string | null
   created_at?: string
 }
 
@@ -62,3 +68,119 @@ export interface ChartResponse {
 }
 
 export type ChartRange = '1h' | '6h' | '1d' | '7d'
+
+export interface UserData {
+  id: string
+  username: string
+  full_name: string
+  email: string | null
+  email_verified_at: string | null
+  role: 'admin' | 'user'
+  status: 'active' | 'disabled'
+  must_bind_email: boolean
+  created_at: string
+}
+
+export interface RegistrationData {
+  id: string
+  username: string
+  full_name: string
+  email: string
+  status: 'email_pending' | 'pending' | 'approved' | 'rejected'
+  email_verified_at: string | null
+  review_comment: string | null
+  reviewed_at: string | null
+  created_at: string
+}
+
+export interface ProjectMemberData {
+  id: string
+  username: string
+  full_name: string
+}
+
+export interface ProjectData {
+  id: string
+  code: string
+  name: string
+  description: string
+  status: 'active' | 'disabled'
+  members: ProjectMemberData[]
+  created_at: string
+}
+
+export interface ComputeRequestChangeData {
+  id: string
+  change_type: 'extend' | 'expand' | 'release'
+  amount: number
+  approval_status: 'pending' | 'approved' | 'rejected'
+  before_value: number
+  after_value: number
+  reviewer_name: string | null
+  review_comment: string | null
+  reviewed_at: string | null
+  created_at: string
+}
+
+export interface ComputeRequestData {
+  id: string
+  applicant_id: string
+  applicant_username: string
+  applicant_name: string
+  project_id: string
+  project_code: string
+  project_name: string
+  resource_id: string
+  resource_name: string
+  gpu_count: number
+  duration_days: number
+  approval_status: 'pending' | 'approved' | 'rejected'
+  runtime_status: 'not_started' | 'running' | 'expiring' | 'expired' | null
+  actual_gpu_count: number
+  over_quota: boolean
+  reviewer_name: string | null
+  review_comment: string | null
+  reviewed_at: string | null
+  token: string | null
+  started_at: string | null
+  expires_at: string | null
+  created_at: string
+  changes: ComputeRequestChangeData[]
+}
+
+export interface HistoryContainerData {
+  id: string
+  name: string
+  generation: number
+  status: 'online' | 'offline' | 'removed'
+  applicant_id: string
+  applicant_name: string
+  project_id: string
+  project_name: string
+  resource_id: string
+  resource_name: string
+  compute_request_id: string
+  first_reported_at: string
+  last_received_at: string
+  removed_at: string | null
+  expires_at: string | null
+}
+
+export interface HourlyHistoryPoint {
+  time: string
+  utilization_avg: number
+  utilization_max: number
+  memory_used_avg: number
+  memory_used_max: number
+  memory_total: number
+  online_seconds: number
+  sample_count: number
+}
+
+export interface HistoryContainerChartData {
+  container_id: string
+  container_name: string
+  first_reported_at: string
+  removed_at: string
+  series: Array<{ gpuid: string; points: HourlyHistoryPoint[] }>
+}

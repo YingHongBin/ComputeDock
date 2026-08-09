@@ -1,4 +1,4 @@
-import { CopyOutlined, PlusOutlined } from '@ant-design/icons'
+import { CopyOutlined, PauseCircleOutlined, PlayCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import { App, Button, Card, Col, Empty, Flex, Row, Statistic, Tag, Tooltip, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import { api, csrfHeaders, errorMessage } from '../api'
@@ -45,11 +45,26 @@ export function OverviewPage() {
   }
 
   const copyToken = async (resource: ResourceCardData) => {
+    if (!resource.token) return
     try {
       await navigator.clipboard.writeText(resource.token)
       message.success('Token 已复制')
     } catch {
       message.error('Token 复制失败')
+    }
+  }
+
+  const toggleResource = async (resource: ResourceCardData) => {
+    if (!session || session.role !== 'admin') return
+    try {
+      const action = resource.status === 'active' ? 'disable' : 'enable'
+      await api.post(`/resources/${resource.id}/${action}`, undefined, {
+        headers: csrfHeaders(session.csrf_token),
+      })
+      message.success(resource.status === 'active' ? '算力资源已禁用' : '算力资源已启用')
+      await load()
+    } catch (error) {
+      message.error(errorMessage(error))
     }
   }
 
@@ -60,7 +75,9 @@ export function OverviewPage() {
           <Typography.Title level={2}>算力资源</Typography.Title>
           <Typography.Text type="secondary">查看 GPU 容量与当前分配情况</Typography.Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditorOpen(true)}>新建算力资源</Button>
+        {session?.role === 'admin' && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditorOpen(true)}>新建算力资源</Button>
+        )}
       </Flex>
       {!loading && resources.length === 0 ? <Empty description="尚未创建算力资源" /> : (
         <Row gutter={[20, 20]}>
@@ -79,7 +96,8 @@ export function OverviewPage() {
                   </div>
                   <Flex align="center" gap={4}>
                     {resource.overallocated && <Tag color="error">超配</Tag>}
-                    <Tooltip title="复制 Token">
+                    {resource.status === 'disabled' && <Tag>已禁用</Tag>}
+                    {session?.role === 'admin' && resource.token && <Tooltip title="复制历史 Token">
                       <Button
                         type="text"
                         icon={<CopyOutlined />}
@@ -89,12 +107,21 @@ export function OverviewPage() {
                           void copyToken(resource)
                         }}
                       />
-                    </Tooltip>
+                    </Tooltip>}
+                    {session?.role === 'admin' && (
+                      <Tooltip title={resource.status === 'active' ? '禁用资源' : '启用资源'}>
+                        <Button
+                          type="text"
+                          icon={resource.status === 'active' ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+                          onClick={(event) => { event.stopPropagation(); void toggleResource(resource) }}
+                        />
+                      </Tooltip>
+                    )}
                   </Flex>
                 </Flex>
                 <Row gutter={12} className="resource-stats">
                   <Col span={8}><Statistic title="总卡数" value={resource.gpu_count} /></Col>
-                  <Col span={8}><Statistic title="已分配" value={resource.allocated_gpu_count} valueStyle={resource.overallocated ? { color: '#dc2626' } : undefined} /></Col>
+                  <Col span={8}><Statistic title="已分配" value={resource.allocated_gpu_count} styles={{ content: resource.overallocated ? { color: '#dc2626' } : {} }} /></Col>
                   <Col span={8}><Statistic title="未分配" value={resource.available_gpu_count} /></Col>
                 </Row>
               </Card>
