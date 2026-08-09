@@ -5,8 +5,10 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -39,19 +41,141 @@ class Admin(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    email: Mapped[str | None] = mapped_column(String(320), unique=True)
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    must_bind_email: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("role IN ('admin', 'user')", name="ck_users_role"),
+        CheckConstraint("status IN ('active', 'disabled')", name="ck_users_status"),
+    )
+
+
 class AdminSession(Base):
     __tablename__ = "admin_sessions"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    admin_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("admins.id", ondelete="CASCADE"), nullable=False
+    admin_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("admins.id", ondelete="CASCADE")
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE")
     )
     token_hash: Mapped[bytes] = mapped_column(LargeBinary(32), unique=True, nullable=False)
     csrf_hash: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    admin: Mapped[Admin] = relationship()
+    admin: Mapped[Admin | None] = relationship()
+    user: Mapped[User | None] = relationship()
+
+    __table_args__ = (
+        CheckConstraint(
+            "admin_id IS NOT NULL OR user_id IS NOT NULL",
+            name="ck_admin_sessions_principal",
+        ),
+    )
+
+
+class RegistrationRequest(Base):
+    __tablename__ = "registration_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    username: Mapped[str] = mapped_column(String(100), nullable=False)
+    full_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="email_pending")
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewer_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    review_comment: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('email_pending', 'pending', 'approved', 'rejected')",
+            name="ck_registration_requests_status",
+        ),
+        Index("ix_registration_requests_status_created", "status", "created_at"),
+    )
+
+
+class EmailActionToken(Base):
+    __tablename__ = "email_action_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    purpose: Mapped[str] = mapped_column(String(40), nullable=False)
+    token_hash: Mapped[bytes] = mapped_column(LargeBinary(32), unique=True, nullable=False)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE")
+    )
+    registration_request_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("registration_requests.id", ondelete="CASCADE")
+    )
+    pending_email: Mapped[str | None] = mapped_column(String(320))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "purpose IN ('registration_verify', 'password_reset', 'email_change')",
+            name="ck_email_action_tokens_purpose",
+        ),
+        Index("ix_email_action_tokens_expiry", "expires_at"),
+    )
+
+
+class Project(Base):
+    __tablename__ = "projects"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    code: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    created_by_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("status IN ('active', 'disabled')", name="ck_projects_status"),
+    )
+
+
+class ProjectMember(Base):
+    __tablename__ = "project_members"
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT"), primary_key=True
+    )
+    added_by_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class ComputeResource(Base):
@@ -61,11 +185,15 @@ class ComputeResource(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     gpu_model: Mapped[str] = mapped_column(String(200), nullable=False)
     gpu_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    token_hash: Mapped[bytes] = mapped_column(LargeBinary(32), unique=True, nullable=False)
-    token: Mapped[str] = mapped_column(String(100), nullable=False)
+    token_hash: Mapped[bytes | None] = mapped_column(LargeBinary(32), unique=True)
+    token: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    disabled_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT")
+    )
 
     containers: Mapped[list[ContainerInstance]] = relationship(back_populates="resource")
 
@@ -80,12 +208,95 @@ class ComputeResource(Base):
     )
 
 
+class ComputeRequest(Base):
+    __tablename__ = "compute_requests"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    applicant_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False
+    )
+    resource_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("compute_resources.id", ondelete="RESTRICT"), nullable=False
+    )
+    gpu_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    approval_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    reviewer_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    review_comment: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    token_hash: Mapped[bytes | None] = mapped_column(LargeBinary(32), unique=True)
+    token: Mapped[str | None] = mapped_column(String(100))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("gpu_count > 0", name="ck_compute_requests_gpu_count"),
+        CheckConstraint(
+            "duration_days BETWEEN 1 AND 14", name="ck_compute_requests_duration_days"
+        ),
+        CheckConstraint(
+            "approval_status IN ('pending', 'approved', 'rejected')",
+            name="ck_compute_requests_approval_status",
+        ),
+        Index("ix_compute_requests_applicant_created", "applicant_id", "created_at"),
+        Index("ix_compute_requests_project_created", "project_id", "created_at"),
+        Index("ix_compute_requests_resource_status", "resource_id", "approval_status"),
+    )
+
+
+class ComputeRequestChange(Base):
+    __tablename__ = "compute_request_changes"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    request_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("compute_requests.id", ondelete="RESTRICT"), nullable=False
+    )
+    requester_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    change_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    approval_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    before_value: Mapped[int] = mapped_column(Integer, nullable=False)
+    after_value: Mapped[int] = mapped_column(Integer, nullable=False)
+    reviewer_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    review_comment: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "change_type IN ('extend', 'expand', 'release')",
+            name="ck_compute_request_changes_type",
+        ),
+        CheckConstraint("amount > 0", name="ck_compute_request_changes_amount"),
+        CheckConstraint(
+            "approval_status IN ('pending', 'approved', 'rejected')",
+            name="ck_compute_request_changes_status",
+        ),
+        Index("ix_compute_request_changes_request_created", "request_id", "created_at"),
+    )
+
+
 class ContainerInstance(Base):
     __tablename__ = "container_instances"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     resource_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("compute_resources.id", ondelete="RESTRICT"), nullable=False
+    )
+    compute_request_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("compute_requests.id", ondelete="RESTRICT")
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -108,6 +319,7 @@ class ContainerInstance(Base):
             postgresql_where=text("removed_at IS NULL"),
         ),
         Index("ix_container_resource_active", "resource_id", "removed_at"),
+        Index("ix_container_request_active", "compute_request_id", "removed_at"),
     )
 
 
@@ -161,4 +373,89 @@ class GpuSample(Base):
         Index("ix_gpu_samples_container_time", "container_id", "collected_at"),
         Index("ix_gpu_samples_resource_time", "resource_id", "collected_at"),
         {"postgresql_partition_by": "RANGE (collected_at)"},
+    )
+
+
+class HourlyGpuRollup(Base):
+    __tablename__ = "hourly_gpu_rollups"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    bucket_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    resource_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("compute_resources.id", ondelete="RESTRICT"), nullable=False
+    )
+    compute_request_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("compute_requests.id", ondelete="RESTRICT")
+    )
+    container_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("container_instances.id", ondelete="RESTRICT"), nullable=False
+    )
+    gpuid: Mapped[str] = mapped_column(String(160), nullable=False)
+    utilization_avg: Mapped[float] = mapped_column(Float, nullable=False)
+    utilization_max: Mapped[int] = mapped_column(Integer, nullable=False)
+    memory_used_avg: Mapped[float] = mapped_column(Float, nullable=False)
+    memory_used_max: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    memory_total: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    online_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    first_collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "container_id", "gpuid", "bucket_start", name="uq_hourly_gpu_rollup_identity"
+        ),
+        CheckConstraint("online_seconds >= 0", name="ck_hourly_gpu_rollups_online_seconds"),
+        CheckConstraint("sample_count > 0", name="ck_hourly_gpu_rollups_sample_count"),
+        Index("ix_hourly_rollups_resource_time", "resource_id", "bucket_start"),
+        Index("ix_hourly_rollups_request_time", "compute_request_id", "bucket_start"),
+        Index("ix_hourly_rollups_container_time", "container_id", "bucket_start"),
+    )
+
+
+class NotificationOutbox(Base):
+    __tablename__ = "notification_outbox"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    idempotency_key: Mapped[str] = mapped_column(String(240), unique=True, nullable=False)
+    template: Mapped[str] = mapped_column(String(80), nullable=False)
+    to_address: Mapped[str] = mapped_column(String(320), nullable=False)
+    cc_addresses: Mapped[list[str]] = mapped_column(JsonType, nullable=False, default=list)
+    payload: Mapped[dict[str, object]] = mapped_column(JsonType, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'sending', 'sent', 'failed')",
+            name="ck_notification_outbox_status",
+        ),
+        Index("ix_notification_outbox_delivery", "status", "available_at"),
+    )
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT")
+    )
+    action: Mapped[str] = mapped_column(String(100), nullable=False)
+    object_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    object_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    before: Mapped[dict[str, object] | None] = mapped_column(JsonType)
+    after: Mapped[dict[str, object] | None] = mapped_column(JsonType)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index("ix_audit_events_object", "object_type", "object_id", "created_at"),
+        Index("ix_audit_events_actor_created", "actor_id", "created_at"),
     )
