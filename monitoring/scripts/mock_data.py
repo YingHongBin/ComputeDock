@@ -20,7 +20,7 @@ def parse_args() -> argparse.Namespace:
         default="http://127.0.0.1:8001/api/v1/agent/samples",
         help="完整的 Agent 数据上报地址",
     )
-    parser.add_argument("--token", required=True, help="算力资源卡片上显示的 Token")
+    parser.add_argument("--token", required=True, help="已通过算力申请的 Token")
     parser.add_argument("--containers", type=int, default=2, help="模拟容器数量")
     parser.add_argument("--gpus-per-container", type=int, default=2, help="每个容器 GPU 数量")
     parser.add_argument("--hours", type=float, default=1.0, help="生成最近多少小时，最大 24")

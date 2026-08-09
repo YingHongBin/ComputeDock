@@ -41,11 +41,11 @@ trap cleanup EXIT
 usage() {
     cat <<'EOF'
 用法：
-  ./install_agent_service.sh --name <Agent 名称> --token <算力资源 Token> [选项]
+  ./install_agent_service.sh --name <Agent 名称> --token <已通过算力申请 Token> [选项]
 
 选项：
   --name <name>          Web 页面中的 Agent/容器名称（必填）
-  --token <token>        算力资源 Token（必填）
+  --token <token>        已通过算力申请 Token（必填）
   --interval <seconds>   采集间隔，5–3600 秒（默认 15）
   --server-url <url>     完整数据上报地址
   --agent-source <path>  Agent Python 包源码目录（默认为脚本所在目录）

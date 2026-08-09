@@ -96,7 +96,7 @@ docker exec <container-name> tail -f /tmp/computedock-samples.jsonl
 
 ## 6. 正式上报
 
-每个算力资源都有独立 Token。在管理页面复制 Token 后，执行：
+算力申请通过后，管理员在“算力申请”页面复制该申请的 Token，再执行：
 
 ```bash
 COMPUTEDOCK_STATE_DIR=/var/lib/computedock-agent \
@@ -104,7 +104,7 @@ COMPUTEDOCK_STATE_DIR=/var/lib/computedock-agent \
   --server-url 'https://nbdataxai.com/monitor/api/v1/agent/samples' \
   --container-name 'fanzhuoning' \
   --interval 15 \
-  --token 'cdr_EkWS-khXZ47no7zTD2SkOnTuY3qpQ7TuyEVHIFGcizA'
+  --token 'cda_xxx'
 ```
 
 参数说明：
@@ -112,7 +112,7 @@ COMPUTEDOCK_STATE_DIR=/var/lib/computedock-agent \
 - `--server-url`：完整数据上报接口，Agent 不会自动追加路径。
 - `--container-name`：在 Web 详情页中显示的容器名称。
 - `--interval`：两次采集开始时间的间隔，可设置为 5–3600 秒的整数。
-- `--token`：算力资源 Token，通过 Bearer 请求头发送。
+- `--token`：已通过算力申请的 Token，通过 Bearer 请求头发送。普通用户不能查看或复制 Token。
 
 Agent 不校验上报地址的格式。每次请求超时为 10 秒。采集失败、无可见 GPU 或上报失败时，当前批次直接丢弃，不进行补传。
 
@@ -134,7 +134,7 @@ chmod +x /tmp/computedock-agent/install_agent_service.sh
 /tmp/computedock-agent/install_agent_service.sh \
   --name worker-01 \
   --interval 15 \
-  --token '<resource-token>'
+  --token '<approved-request-token>'
 ```
 
 脚本会在当前容器内创建独立 venv、安装 Supervisor、写入服务配置并启动 Agent。`--name` 必须由用户显式指定。默认从脚本所在目录安装 Python 包；可以使用 `--agent-source` 指定其他路径。默认上报地址为 `https://nbdataxai.com/monitor/api/v1/agent/samples`。
@@ -152,7 +152,7 @@ apt-get install -y supervisor
 
 ```ini
 [program:computedock-agent]
-command=/opt/computedock-agent/venv/bin/computedock-agent run --server-url https://nbdataxai.com/monitor/api/v1/agent/samples --container-name worker-01 --interval 15 --token <resource-token>
+command=/opt/computedock-agent/venv/bin/computedock-agent run --server-url https://nbdataxai.com/monitor/api/v1/agent/samples --container-name worker-01 --interval 15 --token <approved-request-token>
 environment=COMPUTEDOCK_STATE_DIR="/var/lib/computedock-agent"
 autostart=true
 autorestart=unexpected
@@ -206,7 +206,7 @@ docker logs -f --tail=100 <container-name>
 
 ### 返回 HTTP 401
 
-确认 Token 与 Web 页面中目标算力资源的 Token 完全一致，并确认该算力资源未被删除。
+确认 Token 与 Web 页面中已通过申请的 Token 完全一致。申请到期或关联用户、项目、资源被禁用后，已通过的 Token 仍会接受上报。
 
 ### 容器名称不一致
 

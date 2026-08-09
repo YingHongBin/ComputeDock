@@ -591,13 +591,13 @@ prompt_agent_interval() {
 prompt_agent_token() {
     local value
     while true; do
-        printf '算力资源 Token: '
+        printf '已通过算力申请 Token: '
         IFS= read -r value || exit 1
         if [[ -n "$value" ]]; then
             agent_token="$value"
             return
         fi
-        warn "算力资源 Token 不能为空。"
+        warn "算力申请 Token 不能为空。"
     done
 }
 

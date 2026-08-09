@@ -82,7 +82,7 @@ AGENT_INTERVAL_DEFAULT=15
 
 GPU 留空时，脚本会显式设置 `NVIDIA_VISIBLE_DEVICES=void`，确保 CUDA 基础镜像或 Docker 的 NVIDIA 默认运行时不会让容器看到宿主机 GPU。Agent 仍会正常运行并通过健康检查，但会静默跳过 GPU 采集。修复前以 GPU 留空方式创建的容器不会自动更新，需要删除并重新创建后才能获得该隔离配置。
 
-Agent 支持两种容器运行模式：`report` 模式继续输入完整上报地址和算力资源 Token，上报地址默认为 `https://nbdataxai.com/monitor/api/v1/agent/samples`；`test` 模式直接将 JSONL 数据写入固定文件 `/opt/computedock-agent/test-samples.jsonl`，不需要地址和 Token，也不会发起 HTTP 请求。
+Agent 支持两种容器运行模式：`report` 模式继续输入完整上报地址和已通过算力申请的 Token，上报地址默认为 `https://nbdataxai.com/monitor/api/v1/agent/samples`；`test` 模式直接将 JSONL 数据写入固定文件 `/opt/computedock-agent/test-samples.jsonl`，不需要地址和 Token，也不会发起 HTTP 请求。
 
 如需将 Agent 安装到已有算力容器，参阅 [ComputeDock Agent 手动安装指南](./AGENT_MANUAL_INSTALL.md)。
 
@@ -117,7 +117,7 @@ docker run -itd \
     -e COMPUTEDOCK_SERVER_URL="https://monitor.example.com/api/v1/gpu/samples" \
     -e COMPUTEDOCK_CONTAINER_NAME="hongbin" \
     -e COMPUTEDOCK_INTERVAL="15" \
-    -e COMPUTEDOCK_TOKEN="resource-token" \
+    -e COMPUTEDOCK_TOKEN="approved-request-token" \
     -e COMPUTEDOCK_STATE_DIR="/var/lib/computedock-agent" \
     -v /data/hongbin:/home/hongbin \
     --name hongbin \

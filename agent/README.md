@@ -29,7 +29,7 @@ COMPUTEDOCK_STATE_DIR=/var/lib/computedock-agent computedock-agent run \
     --server-url 'https://monitor.example.com/api/v1/gpu/samples' \
     --container-name 'worker-01' \
     --interval 15 \
-    --token 'resource-token'
+    --token 'approved-request-token'
 ```
 
 `--server-url` 是完整数据接口地址，Agent 不会追加路径或限制协议。`--interval` 是两次采集开始时间的间隔，必须是 5–3600 秒的整数。Token 也可通过 `COMPUTEDOCK_TOKEN` 传入；命令行参数优先，但明文参数会出现在 Shell 历史和进程列表中。
@@ -44,7 +44,7 @@ COMPUTEDOCK_TOKEN
 COMPUTEDOCK_STATE_DIR
 ```
 
-每次请求对完整地址执行 `POST`，Token 放在 `Authorization: Bearer <token>` 请求头中。请求体示例：
+每次请求对完整地址执行 `POST`，Token 放在 `Authorization: Bearer <token>` 请求头中。新部署应使用管理员从已通过算力申请中复制的 Token；升级前已有资源级 Token 仍可继续使用。请求体示例：
 
 ```json
 {
