@@ -126,6 +126,49 @@ class UserAdminUpdate(BaseModel):
     status: Literal["active", "disabled"] | None = None
 
 
+class ProjectInput(BaseModel):
+    code: str = Field(min_length=1, max_length=100)
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=4000)
+    member_ids: list[uuid.UUID] = Field(default_factory=list)
+
+    @field_validator("code", "name")
+    @classmethod
+    def strip_project_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+    @field_validator("description")
+    @classmethod
+    def strip_description(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("member_ids")
+    @classmethod
+    def unique_members(cls, value: list[uuid.UUID]) -> list[uuid.UUID]:
+        if len(value) != len(set(value)):
+            raise ValueError("member_ids must be unique")
+        return value
+
+
+class ProjectMemberView(BaseModel):
+    id: uuid.UUID
+    username: str
+    full_name: str
+
+
+class ProjectView(BaseModel):
+    id: uuid.UUID
+    code: str
+    name: str
+    description: str
+    status: Literal["active", "disabled"]
+    members: list[ProjectMemberView]
+    created_at: datetime
+
+
 class ResourceInput(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     gpu_model: str = Field(min_length=1, max_length=200)
@@ -148,6 +191,7 @@ class ResourceCard(BaseModel):
     allocated_gpu_count: int
     available_gpu_count: int
     overallocated: bool
+    status: Literal["active", "disabled"] = "active"
     token: str | None = None
 
 

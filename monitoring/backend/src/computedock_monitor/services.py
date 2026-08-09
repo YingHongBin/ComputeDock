@@ -59,6 +59,7 @@ def resource_card(
         allocated_gpu_count=allocated,
         available_gpu_count=max(resource.gpu_count - allocated, 0),
         overallocated=allocated > resource.gpu_count,
+        status="disabled" if resource.disabled_at is not None else "active",
         token=resource.token if include_token else None,
     )
 

@@ -19,7 +19,7 @@ from .proxy_prefix import (
     normalize_forwarded_prefix,
     request_prefix,
 )
-from .routers import auth, resources, users
+from .routers import auth, projects, resources, users
 from .security import hash_password, utcnow
 
 
@@ -123,6 +123,7 @@ if settings.allowed_origin_list:
 
 app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(projects.router)
 app.include_router(resources.router)
 
 

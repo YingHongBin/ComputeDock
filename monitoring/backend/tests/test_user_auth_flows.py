@@ -19,13 +19,15 @@ from computedock_monitor.models import (
     ComputeRequest,
     ComputeRequestChange,
     ComputeResource,
+    ContainerInstance,
     EmailActionToken,
     NotificationOutbox,
     Project,
+    ProjectMember,
     RegistrationRequest,
     User,
 )
-from computedock_monitor.routers import auth, users
+from computedock_monitor.routers import auth, projects, resources, users
 from computedock_monitor.security import hash_password, utcnow
 
 
@@ -44,9 +46,11 @@ def make_test_app(monkeypatch) -> tuple[TestClient, sessionmaker[Session]]:
             RegistrationRequest.__table__,
             EmailActionToken.__table__,
             Project.__table__,
+            ProjectMember.__table__,
             ComputeResource.__table__,
             ComputeRequest.__table__,
             ComputeRequestChange.__table__,
+            ContainerInstance.__table__,
             NotificationOutbox.__table__,
             AuditEvent.__table__,
         ],
@@ -67,6 +71,8 @@ def make_test_app(monkeypatch) -> tuple[TestClient, sessionmaker[Session]]:
     app = FastAPI()
     app.include_router(auth.router)
     app.include_router(users.router)
+    app.include_router(projects.router)
+    app.include_router(resources.router)
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_settings] = lambda: settings
     monkeypatch.setattr(
@@ -191,3 +197,83 @@ def test_disabling_user_revokes_web_session(monkeypatch) -> None:
         "/api/v1/auth/login",
         json={"username": "bob", "password": "long-enough-user-password"},
     ).status_code == 403
+
+
+def test_project_creator_is_not_implicitly_a_member(monkeypatch) -> None:
+    client, sessions = make_test_app(monkeypatch)
+    admin = seed_admin(sessions)
+    now = utcnow()
+    member = User(
+        id=uuid.uuid4(),
+        username="member",
+        full_name="Project Member",
+        email="member@example.test",
+        email_verified_at=now,
+        password_hash=hash_password("long-enough-user-password"),
+        role="user",
+        status="active",
+        must_bind_email=False,
+        created_at=now,
+        updated_at=now,
+    )
+    with sessions() as db:
+        db.add(member)
+        db.commit()
+    csrf = login(client, admin.username, "long-enough-admin-password")
+    response = client.post(
+        "/api/v1/projects",
+        json={
+            "code": "proj-1",
+            "name": "Project One",
+            "description": "",
+            "member_ids": [str(member.id)],
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert response.status_code == 201, response.text
+    assert [item["id"] for item in response.json()["members"]] == [str(member.id)]
+
+
+def test_resource_tokens_are_hidden_from_regular_users(monkeypatch) -> None:
+    client, sessions = make_test_app(monkeypatch)
+    admin = seed_admin(sessions)
+    now = utcnow()
+    user = User(
+        id=uuid.uuid4(),
+        username="viewer",
+        full_name="Resource Viewer",
+        email="viewer@example.test",
+        email_verified_at=now,
+        password_hash=hash_password("long-enough-user-password"),
+        role="user",
+        status="active",
+        must_bind_email=False,
+        created_at=now,
+        updated_at=now,
+    )
+    legacy = ComputeResource(
+        id=uuid.uuid4(),
+        name="legacy",
+        gpu_model="A100",
+        gpu_count=8,
+        token_hash=b"legacy-hash",
+        token="cdr_legacy",
+        created_at=now,
+        updated_at=now,
+    )
+    with sessions() as db:
+        db.add_all([user, legacy])
+        db.commit()
+    csrf = login(client, admin.username, "long-enough-admin-password")
+    response = client.post(
+        "/api/v1/resources",
+        json={"name": "new", "gpu_model": "H100", "gpu_count": 4},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert response.status_code == 201
+    assert response.json()["token"] is None
+    client.cookies.clear()
+    login(client, user.username, "long-enough-user-password")
+    response = client.get("/api/v1/resources")
+    assert response.status_code == 200
+    assert all(item["token"] is None for item in response.json())
