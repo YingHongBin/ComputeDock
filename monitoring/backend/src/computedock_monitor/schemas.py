@@ -4,12 +4,17 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class LoginRequest(BaseModel):
-    username: str
+    username: str = Field(min_length=1, max_length=100)
     password: str
+
+    @field_validator("username")
+    @classmethod
+    def strip_username(cls, value: str) -> str:
+        return value.strip()
 
 
 class ChangePasswordRequest(BaseModel):
@@ -19,7 +24,106 @@ class ChangePasswordRequest(BaseModel):
 
 class AdminView(BaseModel):
     username: str
+    full_name: str
+    email: str | None
+    email_verified: bool
+    must_bind_email: bool
+    role: Literal["admin", "user"]
     csrf_token: str
+
+
+class RegistrationInput(BaseModel):
+    username: str = Field(min_length=1, max_length=100)
+    full_name: str = Field(min_length=1, max_length=200)
+    email: str = Field(min_length=3, max_length=320)
+    password: str = Field(min_length=12, max_length=256)
+
+    @field_validator("username", "full_name")
+    @classmethod
+    def strip_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        value = value.strip().lower()
+        local, separator, domain = value.partition("@")
+        if separator != "@" or not local or "." not in domain or domain.startswith("."):
+            raise ValueError("invalid email address")
+        return value
+
+
+class EmailTokenInput(BaseModel):
+    token: str = Field(min_length=20, max_length=512)
+
+
+class PasswordResetRequest(BaseModel):
+    identity: str = Field(min_length=1, max_length=320)
+
+
+class PasswordResetConfirm(EmailTokenInput):
+    new_password: str = Field(min_length=12, max_length=256)
+
+
+class EmailChangeRequest(BaseModel):
+    current_password: str
+    new_email: str = Field(min_length=3, max_length=320)
+
+    @field_validator("new_email")
+    @classmethod
+    def normalize_email(cls, value: str) -> str:
+        return RegistrationInput.normalize_email(value)
+
+
+class RegistrationRequestView(BaseModel):
+    id: uuid.UUID
+    username: str
+    full_name: str
+    email: str
+    status: Literal["email_pending", "pending", "approved", "rejected"]
+    email_verified_at: datetime | None
+    review_comment: str | None
+    reviewed_at: datetime | None
+    created_at: datetime
+
+
+class ReviewInput(BaseModel):
+    decision: Literal["approved", "rejected"]
+    comment: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("comment")
+    @classmethod
+    def strip_comment(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
+    @model_validator(mode="after")
+    def require_rejection_comment(self):
+        if self.decision == "rejected" and self.comment is None:
+            raise ValueError("rejection comment is required")
+        return self
+
+
+class UserView(BaseModel):
+    id: uuid.UUID
+    username: str
+    full_name: str
+    email: str | None
+    email_verified_at: datetime | None
+    role: Literal["admin", "user"]
+    status: Literal["active", "disabled"]
+    must_bind_email: bool
+    created_at: datetime
+
+
+class UserAdminUpdate(BaseModel):
+    role: Literal["admin", "user"] | None = None
+    status: Literal["active", "disabled"] | None = None
 
 
 class ResourceInput(BaseModel):
@@ -44,7 +148,7 @@ class ResourceCard(BaseModel):
     allocated_gpu_count: int
     available_gpu_count: int
     overallocated: bool
-    token: str
+    token: str | None = None
 
 
 class ResourceDetail(ResourceCard):

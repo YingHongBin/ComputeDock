@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..auth import AuthContext, require_admin, require_csrf
+from ..auth import AuthContext, require_admin_csrf, require_user
 from ..config import Settings, get_settings
 from ..database import get_db
 from ..models import ComputeResource, ContainerInstance
@@ -36,7 +36,7 @@ def active_resource(db: Session, resource_id: uuid.UUID) -> ComputeResource:
     return resource
 
 
-def card_for(db: Session, resource: ComputeResource) -> ResourceCard:
+def card_for(db: Session, resource: ComputeResource, *, include_token: bool) -> ResourceCard:
     containers = list(
         db.scalars(
             select(ContainerInstance).where(
@@ -45,12 +45,12 @@ def card_for(db: Session, resource: ComputeResource) -> ResourceCard:
             )
         )
     )
-    return resource_card(resource, containers)
+    return resource_card(resource, containers, include_token=include_token)
 
 
 @router.get("", response_model=list[ResourceCard])
 def list_resources(
-    _auth: AuthContext = Depends(require_admin),
+    auth: AuthContext = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[ResourceCard]:
     resources = list(
@@ -66,13 +66,20 @@ def list_resources(
     by_resource: dict[uuid.UUID, list[ContainerInstance]] = {}
     for container in containers:
         by_resource.setdefault(container.resource_id, []).append(container)
-    return [resource_card(item, by_resource.get(item.id, [])) for item in resources]
+    return [
+        resource_card(
+            item,
+            by_resource.get(item.id, []),
+            include_token=auth.user.role == "admin",
+        )
+        for item in resources
+    ]
 
 
 @router.post("", response_model=ResourceDetail, status_code=status.HTTP_201_CREATED)
 def create_resource(
     payload: ResourceInput,
-    _auth: AuthContext = Depends(require_csrf),
+    _auth: AuthContext = Depends(require_admin_csrf),
     db: Session = Depends(get_db),
 ) -> ResourceDetail:
     now = utcnow()
@@ -100,11 +107,11 @@ def create_resource(
 @router.get("/{resource_id}", response_model=ResourceDetail)
 def get_resource(
     resource_id: uuid.UUID,
-    _auth: AuthContext = Depends(require_admin),
+    auth: AuthContext = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> ResourceDetail:
     resource = active_resource(db, resource_id)
-    card = card_for(db, resource)
+    card = card_for(db, resource, include_token=auth.user.role == "admin")
     return ResourceDetail(**card.model_dump(), created_at=resource.created_at)
 
 
@@ -112,7 +119,7 @@ def get_resource(
 def update_resource(
     resource_id: uuid.UUID,
     payload: ResourceInput,
-    _auth: AuthContext = Depends(require_csrf),
+    _auth: AuthContext = Depends(require_admin_csrf),
     db: Session = Depends(get_db),
 ) -> ResourceDetail:
     resource = active_resource(db, resource_id)
@@ -125,14 +132,14 @@ def update_resource(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "resource name already exists") from exc
-    card = card_for(db, resource)
+    card = card_for(db, resource, include_token=True)
     return ResourceDetail(**card.model_dump(), created_at=resource.created_at)
 
 
 @router.delete("/{resource_id}", status_code=status.HTTP_204_NO_CONTENT)
 def archive_resource(
     resource_id: uuid.UUID,
-    _auth: AuthContext = Depends(require_csrf),
+    _auth: AuthContext = Depends(require_admin_csrf),
     db: Session = Depends(get_db),
 ) -> Response:
     resource = active_resource(db, resource_id)
@@ -162,7 +169,7 @@ def archive_resource(
 @router.get("/{resource_id}/containers", response_model=list[ContainerSummary])
 def list_containers(
     resource_id: uuid.UUID,
-    _auth: AuthContext = Depends(require_admin),
+    _auth: AuthContext = Depends(require_user),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> list[ContainerSummary]:
@@ -174,7 +181,7 @@ def list_containers(
 def remove_container(
     resource_id: uuid.UUID,
     container_id: uuid.UUID,
-    _auth: AuthContext = Depends(require_csrf),
+    _auth: AuthContext = Depends(require_admin_csrf),
     db: Session = Depends(get_db),
 ) -> Response:
     active_resource(db, resource_id)
@@ -197,7 +204,7 @@ def get_chart(
     resource_id: uuid.UUID,
     container_id: uuid.UUID,
     range_name: str = Query(default="7d", alias="range", pattern="^(1h|6h|1d|7d)$"),
-    _auth: AuthContext = Depends(require_admin),
+    _auth: AuthContext = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> ChartResponse:
     active_resource(db, resource_id)

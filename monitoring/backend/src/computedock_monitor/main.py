@@ -7,35 +7,87 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from .config import get_settings
 from .database import SessionLocal
-from .models import Admin
+from .models import Admin, EmailActionToken, User
+from .notifications import action_url, enqueue_notification, issue_action_token
 from .proxy_prefix import (
     FORWARDED_PREFIX_HEADER,
     inject_base_href,
     normalize_forwarded_prefix,
     request_prefix,
 )
-from .routers import auth, resources
+from .routers import auth, resources, users
 from .security import hash_password, utcnow
 
 
 def ensure_initial_admin() -> None:
     settings = get_settings()
     with SessionLocal() as db:
-        if db.scalar(select(Admin).limit(1)) is not None:
-            return
         now = utcnow()
-        db.add(
-            Admin(
-                username=settings.admin_username,
-                password_hash=hash_password(settings.admin_password),
-                created_at=now,
-                updated_at=now,
-            )
+        admin = db.scalar(
+            select(Admin).where(func.lower(Admin.username) == settings.admin_username.lower())
         )
+        user = db.scalar(
+            select(User).where(func.lower(User.username) == settings.admin_username.lower())
+        )
+        if user is None:
+            if admin is None:
+                admin = Admin(
+                    username=settings.admin_username,
+                    password_hash=hash_password(settings.admin_password),
+                    created_at=now,
+                    updated_at=now,
+                )
+                db.add(admin)
+                db.flush()
+            user = User(
+                id=admin.id,
+                username=settings.admin_username,
+                full_name=settings.admin_username,
+                password_hash=admin.password_hash,
+                role="admin",
+                status="active",
+                must_bind_email=True,
+                created_at=admin.created_at,
+                updated_at=admin.updated_at,
+            )
+            db.add(user)
+            db.flush()
+        if settings.admin_email and user.email is None:
+            user.email = settings.admin_email.strip().lower()
+            user.must_bind_email = True
+            user.updated_at = now
+        if user.email and user.email_verified_at is None:
+            pending_token = db.scalar(
+                select(EmailActionToken.id).where(
+                    EmailActionToken.user_id == user.id,
+                    EmailActionToken.purpose == "email_change",
+                    EmailActionToken.pending_email == user.email,
+                    EmailActionToken.consumed_at.is_(None),
+                    EmailActionToken.expires_at > now,
+                )
+            )
+            if pending_token is None:
+                token, secret = issue_action_token(
+                    db,
+                    purpose="email_change",
+                    user_id=user.id,
+                    pending_email=user.email,
+                )
+                enqueue_notification(
+                    db,
+                    idempotency_key=f"legacy-admin-email:{token.id}",
+                    template="email_change_verify",
+                    to_address=user.email,
+                    payload={
+                        "full_name": user.full_name,
+                        "action_url": action_url(settings, "/verify-new-email", secret),
+                        "expires_hours": 24,
+                    },
+                )
         db.commit()
 
 
@@ -70,6 +122,7 @@ if settings.allowed_origin_list:
     )
 
 app.include_router(auth.router)
+app.include_router(users.router)
 app.include_router(resources.router)
 
 

@@ -15,6 +15,16 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def is_expired(expires_at: datetime, now: datetime | None = None) -> bool:
+    return as_utc(expires_at) <= as_utc(now or utcnow())
+
+
 def digest_secret(value: str) -> bytes:
     return hashlib.sha256(value.encode("utf-8")).digest()
 
@@ -32,6 +42,14 @@ def verify_password(password_hash: str, password: str) -> bool:
 
 def make_resource_token() -> str:
     return f"cdr_{secrets.token_urlsafe(32)}"
+
+
+def make_compute_request_token() -> str:
+    return f"cda_{secrets.token_urlsafe(32)}"
+
+
+def make_email_action_token() -> str:
+    return secrets.token_urlsafe(48)
 
 
 @dataclass(frozen=True)

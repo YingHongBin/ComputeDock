@@ -40,6 +40,8 @@ def aligned_chart_window(
 def resource_card(
     resource: ComputeResource,
     containers: list[ContainerInstance],
+    *,
+    include_token: bool = True,
 ) -> ResourceCard:
     allocated = len(
         {
@@ -57,7 +59,7 @@ def resource_card(
         allocated_gpu_count=allocated,
         available_gpu_count=max(resource.gpu_count - allocated, 0),
         overallocated=allocated > resource.gpu_count,
-        token=resource.token,
+        token=resource.token if include_token else None,
     )
 
 
