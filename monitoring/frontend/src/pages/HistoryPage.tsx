@@ -15,7 +15,6 @@ export function HistoryPage({ mode }: { mode: 'users' | 'projects' }) {
   const [requests, setRequests] = useState<ComputeRequestData[]>([])
   const [containers, setContainers] = useState<HistoryContainerData[]>([])
   const [requestStatus, setRequestStatus] = useState<string>()
-  const [containerStatus, setContainerStatus] = useState<string>()
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
@@ -36,7 +35,7 @@ export function HistoryPage({ mode }: { mode: 'users' | 'projects' }) {
     const key = mode === 'users' ? 'applicant_id' : 'project_id'
     Promise.all([
       api.get<ComputeRequestData[]>('/compute-requests', { params: { [key]: selected } }),
-      api.get<HistoryContainerData[]>('/history/containers', { params: { [mode === 'users' ? 'user_id' : 'project_id']: selected, limit: 500 } }),
+      api.get<HistoryContainerData[]>('/history/containers', { params: { [mode === 'users' ? 'user_id' : 'project_id']: selected, container_status: 'removed', limit: 500 } }),
     ]).then(([requestResponse, containerResponse]) => {
       setRequests(requestResponse.data)
       setContainers(containerResponse.data)
@@ -44,7 +43,6 @@ export function HistoryPage({ mode }: { mode: 'users' | 'projects' }) {
   }, [mode, selected])
 
   const visibleRequests = useMemo(() => requestStatus ? requests.filter((item) => item.approval_status === requestStatus) : requests, [requestStatus, requests])
-  const visibleContainers = useMemo(() => containerStatus ? containers.filter((item) => item.status === containerStatus) : containers, [containerStatus, containers])
 
   const requestColumns: ColumnsType<ComputeRequestData> = [
     { title: '申请人', dataIndex: 'applicant_name' },
@@ -61,7 +59,6 @@ export function HistoryPage({ mode }: { mode: 'users' | 'projects' }) {
     { title: '申请人', dataIndex: 'applicant_name' },
     { title: '项目', dataIndex: 'project_name' },
     { title: '资源', dataIndex: 'resource_name' },
-    { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === 'online' ? 'success' : undefined}>{value === 'online' ? '在线' : value === 'offline' ? '失联' : '已移除'}</Tag> },
     { title: '首次上报', dataIndex: 'first_reported_at', render: (value) => dayjs(value).format('YYYY-MM-DD HH:mm') },
     { title: '移除时间', dataIndex: 'removed_at', render: (value) => value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '--' },
   ]
@@ -93,18 +90,15 @@ export function HistoryPage({ mode }: { mode: 'users' | 'projects' }) {
               </>,
             },
             {
-              key: 'containers', label: `容器记录 (${visibleContainers.length})`, children: <>
-                <Select allowClear placeholder="容器状态" className="history-filter" value={containerStatus} onChange={setContainerStatus} options={[{ value: 'online', label: '在线' }, { value: 'offline', label: '失联' }, { value: 'removed', label: '已移除' }]} />
+              key: 'containers', label: `历史容器 (${containers.length})`, children: <>
                 <Table
                   rowKey="id"
                   loading={loading}
                   columns={containerColumns}
-                  dataSource={visibleContainers}
+                  dataSource={containers}
                   scroll={{ x: 1000 }}
                   onRow={(row) => ({
-                    onClick: () => row.status === 'removed'
-                      ? navigate(`/history/containers/${row.id}`)
-                      : navigate(`/resources/${row.resource_id}`),
+                    onClick: () => navigate(`/history/containers/${row.id}`),
                   })}
                   rowClassName="clickable-row"
                 />
