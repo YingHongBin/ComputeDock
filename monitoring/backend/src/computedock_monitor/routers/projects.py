@@ -37,7 +37,6 @@ def project_members(db: Session, project_id: uuid.UUID) -> list[User]:
 def project_view(db: Session, project: Project) -> ProjectView:
     return ProjectView(
         id=project.id,
-        code=project.code,
         name=project.name,
         description=project.description,
         status=project.status,  # type: ignore[arg-type]
@@ -108,7 +107,6 @@ def create_project(
     now = utcnow()
     project = Project(
         id=uuid.uuid4(),
-        code=payload.code,
         name=payload.name,
         description=payload.description,
         status="active",
@@ -126,7 +124,6 @@ def create_project(
         "project",
         project.id,
         after={
-            "code": project.code,
             "name": project.name,
             "member_ids": [str(user.id) for user in members],
         },
@@ -135,7 +132,7 @@ def create_project(
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "project code or name already exists") from exc
+        raise HTTPException(status.HTTP_409_CONFLICT, "project name already exists") from exc
     return project_view(db, project)
 
 
@@ -152,12 +149,10 @@ def update_project(
     old_members = [str(user.id) for user in project_members(db, project.id)]
     members = validated_members(db, payload.member_ids)
     before = {
-        "code": project.code,
         "name": project.name,
         "description": project.description,
         "member_ids": old_members,
     }
-    project.code = payload.code
     project.name = payload.name
     project.description = payload.description
     project.updated_at = utcnow()
@@ -170,7 +165,6 @@ def update_project(
         project.id,
         before=before,
         after={
-            "code": project.code,
             "name": project.name,
             "description": project.description,
             "member_ids": [str(user.id) for user in members],
@@ -180,7 +174,7 @@ def update_project(
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "project code or name already exists") from exc
+        raise HTTPException(status.HTTP_409_CONFLICT, "project name already exists") from exc
     return project_view(db, project)
 
 

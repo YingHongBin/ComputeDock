@@ -78,7 +78,7 @@ CREATE INDEX ix_email_action_tokens_expiry ON email_action_tokens(expires_at);
 
 CREATE TABLE projects (
     id uuid PRIMARY KEY,
-    code varchar(100) NOT NULL UNIQUE,
+    code varchar(100) NOT NULL UNIQUE DEFAULT gen_random_uuid()::text,
     name varchar(200) NOT NULL UNIQUE,
     description text NOT NULL DEFAULT '',
     status varchar(20) NOT NULL,

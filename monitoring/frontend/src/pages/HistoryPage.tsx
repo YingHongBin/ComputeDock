@@ -25,7 +25,7 @@ export function HistoryPage({ mode }: { mode: 'users' | 'projects' }) {
     api.get<UserData[] | ProjectData[]>(endpoint)
       .then(({ data }) => setEntities(mode === 'users'
         ? (data as UserData[]).map((item) => ({ value: item.id, label: `${item.full_name} (${item.username})` }))
-        : (data as ProjectData[]).map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))))
+        : (data as ProjectData[]).map((item) => ({ value: item.id, label: item.name }))))
       .catch((error) => message.error(errorMessage(error)))
   }, [mode])
 

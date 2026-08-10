@@ -295,7 +295,6 @@ def test_project_creator_is_not_implicitly_a_member(monkeypatch) -> None:
     response = client.post(
         "/api/v1/projects",
         json={
-            "code": "proj-1",
             "name": "Project One",
             "description": "",
             "member_ids": [str(member.id)],
@@ -303,7 +302,18 @@ def test_project_creator_is_not_implicitly_a_member(monkeypatch) -> None:
         headers={"X-CSRF-Token": csrf},
     )
     assert response.status_code == 201, response.text
+    assert "code" not in response.json()
     assert [item["id"] for item in response.json()["members"]] == [str(member.id)]
+    second = client.post(
+        "/api/v1/projects",
+        json={"name": "Project Two", "description": "", "member_ids": []},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert second.status_code == 201, second.text
+    assert "code" not in second.json()
+    with sessions() as db:
+        internal_codes = list(db.scalars(select(Project.code)))
+    assert len(internal_codes) == len(set(internal_codes)) == 2
 
 
 def test_resource_tokens_are_hidden_from_regular_users(monkeypatch) -> None:
@@ -382,7 +392,6 @@ def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatc
     )
     project = Project(
         id=uuid.uuid4(),
-        code="gpu-project",
         name="GPU Project",
         description="",
         status="active",
@@ -562,7 +571,6 @@ def test_admin_can_approve_own_compute_request(monkeypatch) -> None:
     )
     project = Project(
         id=uuid.uuid4(),
-        code="self-review-project",
         name="Self Review Project",
         description="",
         status="active",

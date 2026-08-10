@@ -101,7 +101,6 @@ export interface ProjectMemberData {
 
 export interface ProjectData {
   id: string
-  code: string
   name: string
   description: string
   status: 'active' | 'disabled'
@@ -128,7 +127,6 @@ export interface ComputeRequestData {
   applicant_username: string
   applicant_name: string
   project_id: string
-  project_code: string
   project_name: string
   resource_id: string
   resource_name: string

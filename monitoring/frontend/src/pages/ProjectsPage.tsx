@@ -38,7 +38,6 @@ export function ProjectsPage() {
     setEditing(project)
     if (project) {
       form.setFieldsValue({
-        code: project.code,
         name: project.name,
         description: project.description,
         member_ids: project.members.map((member) => member.id),
@@ -75,7 +74,6 @@ export function ProjectsPage() {
   }
 
   const columns: ColumnsType<ProjectData> = [
-    { title: '项目编号', dataIndex: 'code', width: 130 },
     { title: '项目名称', dataIndex: 'name', width: 180 },
     { title: '说明', dataIndex: 'description', render: (value) => value || '--' },
     { title: '成员', dataIndex: 'members', render: (members: ProjectData['members']) => <Space wrap>{members.length ? members.map((member) => <Tag key={member.id}>{member.full_name}</Tag>) : <Typography.Text type="secondary">暂无成员</Typography.Text>}</Space> },
@@ -92,10 +90,9 @@ export function ProjectsPage() {
         </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor(null)}>新建项目</Button>
       </Flex>
-      <Card><Table rowKey="id" loading={loading} columns={columns} dataSource={projects} scroll={{ x: 1000 }} /></Card>
+      <Card><Table rowKey="id" loading={loading} columns={columns} dataSource={projects} scroll={{ x: 900 }} /></Card>
       <Modal title={editing ? '编辑项目' : '新建项目'} open={editing !== undefined} onCancel={() => setEditing(undefined)} onOk={() => form.submit()} confirmLoading={busy} destroyOnHidden>
         <Form form={form} layout="vertical" onFinish={save} preserve={false}>
-          <Form.Item name="code" label="项目编号" rules={[{ required: true, whitespace: true }]}><Input maxLength={100} /></Form.Item>
           <Form.Item name="name" label="项目名称" rules={[{ required: true, whitespace: true }]}><Input maxLength={200} /></Form.Item>
           <Form.Item name="description" label="说明"><Input.TextArea rows={3} maxLength={4000} /></Form.Item>
           <Form.Item name="member_ids" label="项目成员" initialValue={[]}>

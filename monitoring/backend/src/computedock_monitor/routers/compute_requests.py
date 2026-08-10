@@ -133,7 +133,6 @@ def request_view(db: Session, request: ComputeRequest, *, include_token: bool) -
         applicant_username=applicant.username,
         applicant_name=applicant.full_name,
         project_id=project.id,
-        project_code=project.code,
         project_name=project.name,
         resource_id=resource.id,
         resource_name=resource.name,

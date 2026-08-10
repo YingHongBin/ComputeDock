@@ -127,12 +127,11 @@ class UserAdminUpdate(BaseModel):
 
 
 class ProjectInput(BaseModel):
-    code: str = Field(min_length=1, max_length=100)
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=4000)
     member_ids: list[uuid.UUID] = Field(default_factory=list)
 
-    @field_validator("code", "name")
+    @field_validator("name")
     @classmethod
     def strip_project_text(cls, value: str) -> str:
         value = value.strip()
@@ -161,7 +160,6 @@ class ProjectMemberView(BaseModel):
 
 class ProjectView(BaseModel):
     id: uuid.UUID
-    code: str
     name: str
     description: str
     status: Literal["active", "disabled"]
@@ -206,7 +204,6 @@ class ComputeRequestView(BaseModel):
     applicant_username: str
     applicant_name: str
     project_id: uuid.UUID
-    project_code: str
     project_name: str
     resource_id: uuid.UUID
     resource_name: str

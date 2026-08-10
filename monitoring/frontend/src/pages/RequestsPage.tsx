@@ -190,7 +190,7 @@ export function RequestsPage() {
       <Modal title="新建算力申请" open={requestOpen} onCancel={() => setRequestOpen(false)} onOk={() => requestForm.submit()} confirmLoading={busy} destroyOnHidden>
         <Form form={requestForm} layout="vertical" onFinish={submitRequest} preserve={false}>
           <Form.Item name="project_id" label="所属项目" rules={[{ required: true }]}>
-            <Select options={availableProjects.map((item) => ({ value: item.id, label: `${item.code} · ${item.name}` }))} />
+            <Select options={availableProjects.map((item) => ({ value: item.id, label: item.name }))} />
           </Form.Item>
           <Form.Item name="resource_id" label="算力资源" rules={[{ required: true }]}>
             <Select options={availableResources.map((item) => ({ value: item.id, label: `${item.name} · ${item.gpu_model} · ${item.gpu_count} 张` }))} />

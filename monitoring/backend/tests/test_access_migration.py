@@ -34,6 +34,11 @@ def test_access_migration_adds_permanent_business_records() -> None:
         assert f"CREATE TABLE {table}" in content
 
 
+def test_project_number_is_internal_and_generated_by_database() -> None:
+    content = MIGRATION.read_text(encoding="utf-8")
+    assert "code varchar(100) NOT NULL UNIQUE DEFAULT gen_random_uuid()::text" in content
+
+
 def test_access_migration_keeps_existing_sessions_compatible() -> None:
     content = MIGRATION.read_text(encoding="utf-8")
     assert "ADD COLUMN user_id" in content
