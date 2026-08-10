@@ -42,3 +42,13 @@ def test_container_namespace_migration_preserves_legacy_and_request_names() -> N
     assert "uq_container_request_active_name" in content
     assert "WHERE compute_request_id IS NULL" in content
     assert "WHERE removed_at IS NULL AND compute_request_id IS NOT NULL" in content
+
+
+def test_duration_constraint_migration_accepts_legacy_postgres_name() -> None:
+    access_content = MIGRATION.read_text(encoding="utf-8")
+    scope_content = MIGRATION.with_name("0003_request_container_scope.py").read_text(
+        encoding="utf-8"
+    )
+    assert "CONSTRAINT ck_compute_requests_duration_days" in access_content
+    assert "DROP CONSTRAINT IF EXISTS ck_compute_requests_duration_days" in scope_content
+    assert "DROP CONSTRAINT IF EXISTS compute_requests_duration_days_check" in scope_content

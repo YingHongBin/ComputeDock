@@ -114,7 +114,8 @@ CREATE TABLE compute_requests (
     project_id uuid NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
     resource_id uuid NOT NULL REFERENCES compute_resources(id) ON DELETE RESTRICT,
     gpu_count integer NOT NULL CHECK (gpu_count > 0),
-    duration_days integer NOT NULL CHECK (duration_days BETWEEN 1 AND 14),
+    duration_days integer NOT NULL
+        CONSTRAINT ck_compute_requests_duration_days CHECK (duration_days BETWEEN 1 AND 14),
     approval_status varchar(20) NOT NULL
         CHECK (approval_status IN ('pending', 'approved', 'rejected')),
     reviewer_id uuid REFERENCES users(id) ON DELETE RESTRICT,

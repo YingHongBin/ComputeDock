@@ -9,7 +9,13 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE compute_requests DROP CONSTRAINT ck_compute_requests_duration_days")
+    # 0002 originally let PostgreSQL auto-name this constraint. Accept both the
+    # legacy auto-name and the explicit name used by fresh installations.
+    op.execute(
+        "ALTER TABLE compute_requests "
+        "DROP CONSTRAINT IF EXISTS ck_compute_requests_duration_days, "
+        "DROP CONSTRAINT IF EXISTS compute_requests_duration_days_check"
+    )
     op.execute(
         "ALTER TABLE compute_requests ADD CONSTRAINT ck_compute_requests_duration_days "
         "CHECK (duration_days > 0)"
