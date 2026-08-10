@@ -93,6 +93,27 @@ export interface RegistrationData {
   created_at: string
 }
 
+export interface SmtpSettingsData {
+  host: string
+  port: number
+  username: string
+  from_email: string
+  from_name: string
+  use_tls: boolean
+  password_set: boolean
+  source: 'database' | 'environment'
+}
+
+export interface SmtpSettingsInput {
+  host: string
+  port: number
+  username: string
+  password?: string
+  from_email: string
+  from_name: string
+  use_tls: boolean
+}
+
 export interface ProjectMemberData {
   id: string
   username: string

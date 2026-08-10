@@ -61,6 +61,7 @@ export function AppShell({ children }: PropsWithChildren) {
       { path: '/projects', label: '项目管理' },
       { path: '/history/users', label: '用户历史' },
       { path: '/history/projects', label: '项目历史' },
+      { path: '/settings', label: '设置' },
     ] : []),
   ]
 

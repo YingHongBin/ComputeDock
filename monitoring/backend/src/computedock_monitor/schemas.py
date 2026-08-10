@@ -126,6 +126,43 @@ class UserAdminUpdate(BaseModel):
     status: Literal["active", "disabled"] | None = None
 
 
+class SmtpSettingsInput(BaseModel):
+    host: str = Field(default="", max_length=255)
+    port: int = Field(default=587, ge=1, le=65535)
+    username: str = Field(default="", max_length=320)
+    password: str | None = Field(default=None, max_length=1024)
+    from_email: str = Field(default="", max_length=320)
+    from_name: str = Field(default="ComputeDock", max_length=200)
+    use_tls: bool = True
+
+    @field_validator("host", "username", "from_name")
+    @classmethod
+    def strip_smtp_text(cls, value: str) -> str:
+        value = value.strip()
+        if "\r" in value or "\n" in value:
+            raise ValueError("must not contain newlines")
+        return value
+
+    @field_validator("from_email")
+    @classmethod
+    def normalize_from_email(cls, value: str) -> str:
+        value = value.strip().lower()
+        if not value:
+            return value
+        return RegistrationInput.normalize_email(value)
+
+
+class SmtpSettingsView(BaseModel):
+    host: str
+    port: int
+    username: str
+    from_email: str
+    from_name: str
+    use_tls: bool
+    password_set: bool
+    source: Literal["database", "environment"]
+
+
 class ProjectInput(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=4000)

@@ -14,3 +14,5 @@ def test_collector_owns_agent_upload_endpoint() -> None:
 def test_management_routes_are_not_exposed_by_collector() -> None:
     assert "/api/v1/resources" in route_paths(management_app)
     assert "/api/v1/resources" not in route_paths(collector_app)
+    assert "/api/v1/settings/smtp" in route_paths(management_app)
+    assert "/api/v1/settings/smtp" not in route_paths(collector_app)

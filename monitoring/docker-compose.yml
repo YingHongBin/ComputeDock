@@ -1,7 +1,6 @@
 x-monitoring-build: &monitoring-build
-  build:
-    context: .
-    dockerfile: Dockerfile
+  context: .
+  dockerfile: Dockerfile
 
 services:
   database:
@@ -33,17 +32,24 @@ services:
     restart: unless-stopped
 
   collector:
-    <<: *monitoring-build
-    image: computedock-monitor-collector:${MONITORING_IMAGE_TAG:-local}
+    build:
+      <<: *monitoring-build
+      target: collector
+    image: computedock-monitor-collector:${COLLECTOR_IMAGE_TAG:-${MONITORING_IMAGE_TAG:-local}}
     environment:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
     depends_on:
       database:
         condition: service_healthy
     command:
-      - sh
-      - -c
-      - alembic upgrade head && exec uvicorn computedock_monitor.collector:app --host 0.0.0.0 --port 8001 --proxy-headers --forwarded-allow-ips='*'
+      - uvicorn
+      - computedock_monitor.collector:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+      - --proxy-headers
+      - --forwarded-allow-ips=*
     ports:
       - "${COLLECTOR_PORT:-8001}:8001"
     healthcheck:
@@ -58,8 +64,10 @@ services:
     restart: unless-stopped
 
   app:
-    <<: *monitoring-build
-    image: computedock-monitor-app:${MONITORING_IMAGE_TAG:-local}
+    build:
+      <<: *monitoring-build
+      target: app
+    image: computedock-monitor-app:${APP_IMAGE_TAG:-${MONITORING_IMAGE_TAG:-local}}
     environment:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
       ADMIN_USERNAME: ${ADMIN_USERNAME:?set ADMIN_USERNAME in .env}
@@ -69,25 +77,39 @@ services:
       BUSINESS_TIMEZONE: ${BUSINESS_TIMEZONE:-Asia/Shanghai}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-ComputeDock}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      SMTP_SSL: ${SMTP_SSL:-false}
     depends_on:
-      collector:
+      database:
         condition: service_healthy
     command:
-      - uvicorn
-      - computedock_monitor.main:app
-      - --host
-      - 0.0.0.0
-      - --port
-      - "8000"
-      - --proxy-headers
-      - --forwarded-allow-ips=*
+      - sh
+      - -c
+      - alembic upgrade head && exec uvicorn computedock_monitor.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'
     ports:
       - "${MONITORING_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2).read()
+      interval: 5s
+      timeout: 3s
+      retries: 20
     restart: unless-stopped
 
   worker:
-    <<: *monitoring-build
-    image: computedock-monitor-worker:${MONITORING_IMAGE_TAG:-local}
+    build:
+      <<: *monitoring-build
+      target: worker
+    image: computedock-monitor-worker:${WORKER_IMAGE_TAG:-${MONITORING_IMAGE_TAG:-local}}
     environment:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
       ADMIN_USERNAME: ${ADMIN_USERNAME:?set ADMIN_USERNAME in .env}
@@ -100,12 +122,13 @@ services:
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM_ADDRESS: ${SMTP_FROM_ADDRESS:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-ComputeDock}
       SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
       SMTP_SSL: ${SMTP_SSL:-false}
       WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-60}
       MAIL_MAX_ATTEMPTS: ${MAIL_MAX_ATTEMPTS:-5}
     depends_on:
-      collector:
+      database:
         condition: service_healthy
     command:
       - python

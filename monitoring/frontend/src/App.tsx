@@ -15,6 +15,7 @@ import { ResendVerificationPage } from './pages/ResendVerificationPage'
 import { ResourceDetailPage } from './pages/ResourceDetailPage'
 import { RequestsPage } from './pages/RequestsPage'
 import { ResetPasswordPage } from './pages/ResetPasswordPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { UsersPage } from './pages/UsersPage'
 import { useNavigation } from './routing'
 
@@ -43,6 +44,7 @@ export default function App() {
   else if (path === '/projects') page = session.role === 'admin' ? <AppShell><ProjectsPage /></AppShell> : <Redirect to="/" />
   else if (path === '/history/users') page = session.role === 'admin' ? <AppShell><HistoryPage mode="users" /></AppShell> : <Redirect to="/" />
   else if (path === '/history/projects') page = session.role === 'admin' ? <AppShell><HistoryPage mode="projects" /></AppShell> : <Redirect to="/" />
+  else if (path === '/settings') page = session.role === 'admin' ? <AppShell><SettingsPage /></AppShell> : <Redirect to="/" />
   else {
     const resourceMatch = path.match(/^\/resources\/([0-9a-f-]+)$/i)
     const historyMatch = path.match(/^\/history\/containers\/([0-9a-f-]+)$/i)

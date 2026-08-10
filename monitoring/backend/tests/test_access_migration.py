@@ -71,9 +71,21 @@ def test_combined_migration_removes_initial_check_constraints() -> None:
     assert "DROP CONSTRAINT IF EXISTS" in content
 
 
-def test_access_release_is_one_migration_after_initial() -> None:
+def test_smtp_settings_are_added_in_separate_migration() -> None:
+    migration = MIGRATION.with_name("0003_smtp_settings.py")
+    content = migration.read_text(encoding="utf-8")
+    assert 'down_revision = "0002_access_requests"' in content
+    assert "CREATE TABLE smtp_settings" in content
+    assert "CREATE TABLE smtp_settings" not in MIGRATION.read_text(encoding="utf-8")
+
+
+def test_migration_chain_contains_smtp_settings_revision() -> None:
     versions = sorted(MIGRATION.parent.glob("*.py"))
-    assert [path.name for path in versions] == ["0001_initial.py", "0002_access_requests.py"]
+    assert [path.name for path in versions] == [
+        "0001_initial.py",
+        "0002_access_requests.py",
+        "0003_smtp_settings.py",
+    ]
 
 
 def test_model_metadata_does_not_recreate_check_constraints() -> None:

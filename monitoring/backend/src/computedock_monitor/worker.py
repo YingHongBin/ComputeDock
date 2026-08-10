@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import argparse
-import smtplib
 import time
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as datetime_time
-from email.message import EmailMessage
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select, text, update
@@ -24,6 +22,7 @@ from .models import (
 )
 from .notifications import active_admin_emails, enqueue_notification
 from .security import as_utc, utcnow
+from .smtp import SmtpConnectionSettings, effective_smtp_settings, send_email
 
 AUTO_REJECTION_REASONS = {
     "关联用户已禁用",
@@ -77,27 +76,22 @@ def render_notification(notification: NotificationOutbox) -> tuple[str, str]:
     return subject, "\n".join(lines)
 
 
-def send_notification(settings: Settings, notification: NotificationOutbox) -> None:
-    if not settings.smtp_host or not settings.smtp_from_address:
-        raise RuntimeError("SMTP_HOST and SMTP_FROM_ADDRESS must be configured")
+def send_notification(
+    smtp_settings: SmtpConnectionSettings, notification: NotificationOutbox
+) -> None:
     subject, body = render_notification(notification)
-    message = EmailMessage()
-    message["Subject"] = subject
-    message["From"] = settings.smtp_from_address
-    message["To"] = notification.to_address
-    if notification.cc_addresses:
-        message["Cc"] = ", ".join(notification.cc_addresses)
-    message.set_content(body)
-    smtp_class = smtplib.SMTP_SSL if settings.smtp_ssl else smtplib.SMTP
-    with smtp_class(settings.smtp_host, settings.smtp_port, timeout=15) as smtp:
-        if settings.smtp_starttls and not settings.smtp_ssl:
-            smtp.starttls()
-        if settings.smtp_username:
-            smtp.login(settings.smtp_username, settings.smtp_password)
-        smtp.send_message(message)
+    send_email(
+        smtp_settings,
+        to_address=notification.to_address,
+        cc_addresses=notification.cc_addresses,
+        subject=subject,
+        body=body,
+    )
 
 
-def process_one_notification(db: Session, settings: Settings) -> bool:
+def process_one_notification(
+    db: Session, settings: Settings, smtp_settings: SmtpConnectionSettings
+) -> bool:
     now = utcnow()
     db.execute(
         update(NotificationOutbox)
@@ -125,8 +119,8 @@ def process_one_notification(db: Session, settings: Settings) -> bool:
     notification.updated_at = now
     db.commit()
     try:
-        send_notification(settings, notification)
-    except (OSError, RuntimeError, smtplib.SMTPException) as exc:
+        send_notification(smtp_settings, notification)
+    except (OSError, RuntimeError) as exc:
         notification.last_error = str(exc)[:2000]
         notification.status = (
             "failed" if notification.attempts >= settings.mail_max_attempts else "pending"
@@ -382,7 +376,8 @@ def run_once(settings: Settings | None = None) -> None:
         schedule_automatic_rejection_notifications(db)
         schedule_expiry_notifications(db)
         aggregate_pending_days(db, current_settings)
-        while process_one_notification(db, current_settings):
+        smtp_settings = effective_smtp_settings(db, current_settings)
+        while process_one_notification(db, current_settings, smtp_settings):
             pass
 
 

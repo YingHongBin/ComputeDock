@@ -27,6 +27,7 @@ from computedock_monitor.models import (
     Project,
     ProjectMember,
     RegistrationRequest,
+    SmtpSetting,
     User,
     WorkerCheckpoint,
 )
@@ -38,6 +39,7 @@ from computedock_monitor.routers import (
     resources,
     users,
 )
+from computedock_monitor.routers import settings as settings_router
 from computedock_monitor.security import digest_secret, hash_password, utcnow
 from computedock_monitor.services import authenticate_reporting_token
 
@@ -64,6 +66,7 @@ def make_test_app(monkeypatch) -> tuple[TestClient, sessionmaker[Session]]:
             ContainerInstance.__table__,
             HourlyGpuRollup.__table__,
             NotificationOutbox.__table__,
+            SmtpSetting.__table__,
             AuditEvent.__table__,
             WorkerCheckpoint.__table__,
         ],
@@ -88,6 +91,7 @@ def make_test_app(monkeypatch) -> tuple[TestClient, sessionmaker[Session]]:
     app.include_router(compute_requests.router)
     app.include_router(history.router)
     app.include_router(resources.router)
+    app.include_router(settings_router.router)
     app.dependency_overrides[get_db] = override_db
     app.dependency_overrides[get_settings] = lambda: settings
     monkeypatch.setattr(
@@ -314,6 +318,66 @@ def test_project_creator_is_not_implicitly_a_member(monkeypatch) -> None:
     with sessions() as db:
         internal_codes = list(db.scalars(select(Project.code)))
     assert len(internal_codes) == len(set(internal_codes)) == 2
+
+
+def test_admin_can_save_and_test_smtp_without_password_disclosure(monkeypatch) -> None:
+    client, sessions = make_test_app(monkeypatch)
+    admin = seed_admin(sessions)
+    csrf = login(client, admin.username, "long-enough-admin-password")
+
+    response = client.get("/api/v1/settings/smtp")
+    assert response.status_code == 200
+    assert response.json()["source"] == "environment"
+    assert response.json()["password_set"] is False
+    assert "password" not in response.json()
+
+    payload = {
+        "host": "smtp.example.test",
+        "port": 587,
+        "username": "smtp-user",
+        "password": "smtp-secret",
+        "from_email": "monitor@example.test",
+        "from_name": "ComputeDock Monitor",
+        "use_tls": True,
+    }
+    response = client.put(
+        "/api/v1/settings/smtp",
+        json=payload,
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["source"] == "database"
+    assert response.json()["password_set"] is True
+    assert "password" not in response.json()
+
+    response = client.put(
+        "/api/v1/settings/smtp",
+        json={**payload, "host": "smtp2.example.test", "password": None},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert response.status_code == 200, response.text
+    with sessions() as db:
+        saved = db.get(SmtpSetting, 1)
+        assert saved is not None
+        assert saved.host == "smtp2.example.test"
+        assert saved.password == "smtp-secret"
+
+    sent: dict[str, object] = {}
+
+    def fake_send_email(connection, **kwargs) -> None:
+        sent["connection"] = connection
+        sent.update(kwargs)
+
+    monkeypatch.setattr(settings_router, "send_email", fake_send_email)
+    response = client.post(
+        "/api/v1/settings/smtp/test",
+        json={**payload, "host": "smtp2.example.test", "password": None},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {"status": "sent", "recipient": admin.email}
+    assert sent["to_address"] == admin.email
+    assert sent["connection"].password == "smtp-secret"  # type: ignore[union-attr]
 
 
 def test_resource_tokens_are_hidden_from_regular_users(monkeypatch) -> None:

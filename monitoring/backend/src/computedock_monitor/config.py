@@ -28,6 +28,7 @@ class Settings(DatabaseSettings):
     smtp_username: str = ""
     smtp_password: str = ""
     smtp_from_address: str = ""
+    smtp_from_name: str = "ComputeDock"
     smtp_starttls: bool = True
     smtp_ssl: bool = False
     worker_poll_seconds: int = 60

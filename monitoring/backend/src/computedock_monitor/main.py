@@ -20,6 +20,7 @@ from .proxy_prefix import (
     request_prefix,
 )
 from .routers import auth, compute_requests, history, projects, resources, users
+from .routers import settings as settings_router
 from .security import hash_password, utcnow
 
 
@@ -126,6 +127,7 @@ app.include_router(users.router)
 app.include_router(projects.router)
 app.include_router(compute_requests.router)
 app.include_router(history.router)
+app.include_router(settings_router.router)
 app.include_router(resources.router)
 
 

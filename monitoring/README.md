@@ -28,6 +28,8 @@
 
 若未配置 SMTP，业务数据仍会保存，但邮件会留在待重试队列中；注册验证、密码重置和通知邮件将无法送达。
 
+管理员可在“设置”页维护 SMTP Host、端口、用户名、密码、发件邮箱、发件人名称和 TLS，并向当前管理员绑定邮箱发送测试邮件。数据库中保存过配置后将优先于 `.env`，Worker 会在下一次轮询时自动读取，无需重启；SMTP 密码不会通过 API 或页面回传。启用 TLS 时，465 端口使用隐式 TLS，其他端口使用 STARTTLS。
+
 ## 用户、项目与算力申请
 
 - 普通用户可以查看当前算力资源和容器使用情况、提交算力申请，并对自己已通过且未到期的申请提交延时、扩容或释放部分 GPU 的变更申请。
@@ -87,20 +89,37 @@ location /monitor/ {
 
 ## 升级顺序与数据兼容
 
-数据库迁移由 collector 启动时执行。涉及本次数据结构和采集令牌升级时，先更新 collector，确认健康后再更新 app 和 worker：
+app、collector 和 worker 使用独立构建目标、镜像和版本标签，运行时都只依赖 database，可以分别更新。`APP_IMAGE_TAG`、`COLLECTOR_IMAGE_TAG` 和 `WORKER_IMAGE_TAG` 可单独指定；未指定时均回退到 `MONITORING_IMAGE_TAG`。
+
+数据库迁移由 app 在启动管理服务前执行，collector 和 worker 不执行 Alembic。涉及数据库结构的完整更新必须先更新 app；app 完成迁移并通过健康检查后，再按需独立更新 collector 和 worker：
 
 ```shell
-docker compose build collector app worker
-docker compose up -d --no-deps collector
-docker compose up -d --no-deps app worker
+docker compose build app
+docker compose up -d --no-deps --force-recreate app
+docker compose ps app
+docker compose logs --tail=100 app
+docker compose build collector
+docker compose up -d --no-deps --force-recreate collector
+docker compose build worker
+docker compose up -d --no-deps --force-recreate worker
 ```
 
-只更新管理 API 和页面时可单独重建 app：
+不涉及数据库结构时，只需构建并重建发生变化的服务。更新 app 不会中断 Agent 上报，更新 collector 也不会重启 app 或 worker：
 
 ```shell
 docker compose build app
 docker compose up -d --no-deps app
 ```
+
+为保证独立更新安全，迁移必须兼容仍在运行的旧版 collector 和 worker：先增加新结构并完成服务升级，破坏性删除或重命名留到后续版本。
+
+需要只执行数据库迁移而不常驻启动管理服务时，复用 app 镜像：
+
+```shell
+docker compose run --rm --no-deps app alembic upgrade head
+```
+
+仅新增数据库迁移文件时，collector 和 worker 均无需重新构建；迁移文件只随 app 镜像发布。
 
 迁移保留现有容器、原始样本、聚合结果和旧资源 Token。历史数据计入“历史未归属”，但不提供单独入口和归属修改功能。
 

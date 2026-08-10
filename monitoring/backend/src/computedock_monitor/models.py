@@ -407,6 +407,23 @@ class NotificationOutbox(Base):
     __table_args__ = (Index("ix_notification_outbox_delivery", "status", "available_at"),)
 
 
+class SmtpSetting(Base):
+    __tablename__ = "smtp_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    host: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    port: Mapped[int] = mapped_column(Integer, nullable=False, default=587)
+    username: Mapped[str] = mapped_column(String(320), nullable=False, default="")
+    password: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    from_email: Mapped[str] = mapped_column(String(320), nullable=False, default="")
+    from_name: Mapped[str] = mapped_column(String(200), nullable=False, default="ComputeDock")
+    use_tls: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    updated_by_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
 
