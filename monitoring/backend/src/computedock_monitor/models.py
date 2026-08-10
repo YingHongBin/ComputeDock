@@ -6,7 +6,6 @@ from datetime import date, datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
-    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -57,11 +56,6 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    __table_args__ = (
-        CheckConstraint("role IN ('admin', 'user')", name="ck_users_role"),
-        CheckConstraint("status IN ('active', 'disabled')", name="ck_users_status"),
-    )
-
 
 class AdminSession(Base):
     __tablename__ = "admin_sessions"
@@ -80,13 +74,6 @@ class AdminSession(Base):
 
     admin: Mapped[Admin | None] = relationship()
     user: Mapped[User | None] = relationship()
-
-    __table_args__ = (
-        CheckConstraint(
-            "admin_id IS NOT NULL OR user_id IS NOT NULL",
-            name="ck_admin_sessions_principal",
-        ),
-    )
 
 
 class RegistrationRequest(Base):
@@ -110,13 +97,7 @@ class RegistrationRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    __table_args__ = (
-        CheckConstraint(
-            "status IN ('email_pending', 'pending', 'approved', 'rejected')",
-            name="ck_registration_requests_status",
-        ),
-        Index("ix_registration_requests_status_created", "status", "created_at"),
-    )
+    __table_args__ = (Index("ix_registration_requests_status_created", "status", "created_at"),)
 
 
 class EmailActionToken(Base):
@@ -136,13 +117,7 @@ class EmailActionToken(Base):
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    __table_args__ = (
-        CheckConstraint(
-            "purpose IN ('registration_verify', 'password_reset', 'email_change')",
-            name="ck_email_action_tokens_purpose",
-        ),
-        Index("ix_email_action_tokens_expiry", "expires_at"),
-    )
+    __table_args__ = (Index("ix_email_action_tokens_expiry", "expires_at"),)
 
 
 class Project(Base):
@@ -158,10 +133,6 @@ class Project(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-    __table_args__ = (
-        CheckConstraint("status IN ('active', 'disabled')", name="ck_projects_status"),
-    )
 
 
 class ProjectMember(Base):
@@ -199,7 +170,6 @@ class ComputeResource(Base):
     containers: Mapped[list[ContainerInstance]] = relationship(back_populates="resource")
 
     __table_args__ = (
-        CheckConstraint("gpu_count > 0", name="ck_compute_resources_gpu_count_positive"),
         Index(
             "uq_compute_resources_active_name",
             "name",
@@ -238,12 +208,6 @@ class ComputeRequest(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
-        CheckConstraint("gpu_count > 0", name="ck_compute_requests_gpu_count"),
-        CheckConstraint("duration_days > 0", name="ck_compute_requests_duration_days"),
-        CheckConstraint(
-            "approval_status IN ('pending', 'approved', 'rejected')",
-            name="ck_compute_requests_approval_status",
-        ),
         Index("ix_compute_requests_applicant_created", "applicant_id", "created_at"),
         Index("ix_compute_requests_project_created", "project_id", "created_at"),
         Index("ix_compute_requests_resource_status", "resource_id", "approval_status"),
@@ -274,15 +238,6 @@ class ComputeRequestChange(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
-        CheckConstraint(
-            "change_type IN ('extend', 'expand', 'release')",
-            name="ck_compute_request_changes_type",
-        ),
-        CheckConstraint("amount > 0", name="ck_compute_request_changes_amount"),
-        CheckConstraint(
-            "approval_status IN ('pending', 'approved', 'rejected')",
-            name="ck_compute_request_changes_status",
-        ),
         Index("ix_compute_request_changes_request_created", "request_id", "created_at"),
     )
 
@@ -387,14 +342,6 @@ class GpuSample(Base):
 
     __table_args__ = (
         UniqueConstraint("container_id", "gpuid", "collected_at", name="uq_gpu_sample_identity"),
-        CheckConstraint("memory_total > 0", name="ck_gpu_samples_memory_total"),
-        CheckConstraint(
-            "memory_used >= 0 AND memory_used <= memory_total",
-            name="ck_gpu_samples_memory_used",
-        ),
-        CheckConstraint(
-            "utilization >= 0 AND utilization <= 100", name="ck_gpu_samples_utilization"
-        ),
         Index("ix_gpu_samples_container_time", "container_id", "collected_at"),
         Index("ix_gpu_samples_resource_time", "resource_id", "collected_at"),
         {"postgresql_partition_by": "RANGE (collected_at)"},
@@ -432,8 +379,6 @@ class HourlyGpuRollup(Base):
         UniqueConstraint(
             "container_id", "gpuid", "bucket_start", name="uq_hourly_gpu_rollup_identity"
         ),
-        CheckConstraint("online_seconds >= 0", name="ck_hourly_gpu_rollups_online_seconds"),
-        CheckConstraint("sample_count > 0", name="ck_hourly_gpu_rollups_sample_count"),
         Index("ix_hourly_rollups_resource_time", "resource_id", "bucket_start"),
         Index("ix_hourly_rollups_request_time", "compute_request_id", "bucket_start"),
         Index("ix_hourly_rollups_container_time", "container_id", "bucket_start"),
@@ -457,13 +402,7 @@ class NotificationOutbox(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    __table_args__ = (
-        CheckConstraint(
-            "status IN ('pending', 'sending', 'sent', 'failed')",
-            name="ck_notification_outbox_status",
-        ),
-        Index("ix_notification_outbox_delivery", "status", "available_at"),
-    )
+    __table_args__ = (Index("ix_notification_outbox_delivery", "status", "available_at"),)
 
 
 class AuditEvent(Base):
