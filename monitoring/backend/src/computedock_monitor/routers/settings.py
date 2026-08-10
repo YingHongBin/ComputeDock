@@ -9,8 +9,14 @@ from ..auditing import record_audit
 from ..auth import AuthContext, require_admin, require_admin_csrf
 from ..config import Settings, get_settings
 from ..database import get_db
-from ..models import SmtpSetting
-from ..schemas import SmtpSettingsInput, SmtpSettingsView
+from ..models import SmtpSetting, SystemSetting
+from ..notifications import effective_api_base_url
+from ..schemas import (
+    GeneralSettingsInput,
+    GeneralSettingsView,
+    SmtpSettingsInput,
+    SmtpSettingsView,
+)
 from ..security import utcnow
 from ..smtp import (
     SmtpConnectionSettings,
@@ -19,7 +25,7 @@ from ..smtp import (
     send_email,
 )
 
-router = APIRouter(prefix="/api/v1/settings/smtp", tags=["settings"])
+router = APIRouter(prefix="/api/v1/settings", tags=["settings"])
 
 
 def settings_view(db: Session, settings: Settings) -> SmtpSettingsView:
@@ -57,7 +63,7 @@ def connection_from_payload(
     )
 
 
-@router.get("", response_model=SmtpSettingsView)
+@router.get("/smtp", response_model=SmtpSettingsView)
 def get_smtp_settings(
     _auth: AuthContext = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -66,7 +72,7 @@ def get_smtp_settings(
     return settings_view(db, settings)
 
 
-@router.put("", response_model=SmtpSettingsView)
+@router.put("/smtp", response_model=SmtpSettingsView)
 def update_smtp_settings(
     payload: SmtpSettingsInput,
     auth: AuthContext = Depends(require_admin_csrf),
@@ -120,7 +126,7 @@ def update_smtp_settings(
     return settings_view(db, settings)
 
 
-@router.post("/test", status_code=status.HTTP_200_OK)
+@router.post("/smtp/test", status_code=status.HTTP_200_OK)
 def send_test_email(
     payload: SmtpSettingsInput,
     auth: AuthContext = Depends(require_admin_csrf),
@@ -152,3 +158,45 @@ def send_test_email(
     )
     db.commit()
     return {"status": "sent", "recipient": auth.user.email}
+
+
+@router.get("/general", response_model=GeneralSettingsView)
+def get_general_settings(
+    _auth: AuthContext = Depends(require_admin),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> GeneralSettingsView:
+    saved = db.get(SystemSetting, 1)
+    return GeneralSettingsView(
+        api_base_url=effective_api_base_url(db, settings),
+        source="database" if saved is not None else "environment",
+    )
+
+
+@router.put("/general", response_model=GeneralSettingsView)
+def update_general_settings(
+    payload: GeneralSettingsInput,
+    auth: AuthContext = Depends(require_admin_csrf),
+    db: Session = Depends(get_db),
+) -> GeneralSettingsView:
+    saved = db.get(SystemSetting, 1)
+    before = None
+    if saved is None:
+        saved = SystemSetting(id=1, updated_by_id=auth.user.id, updated_at=utcnow())
+        db.add(saved)
+    else:
+        before = {"api_base_url": saved.api_base_url}
+    saved.api_base_url = payload.api_base_url
+    saved.updated_by_id = auth.user.id
+    saved.updated_at = utcnow()
+    record_audit(
+        db,
+        auth.user,
+        "settings.general.update",
+        "system_settings",
+        "1",
+        before=before,
+        after={"api_base_url": saved.api_base_url},
+    )
+    db.commit()
+    return GeneralSettingsView(api_base_url=saved.api_base_url, source="database")

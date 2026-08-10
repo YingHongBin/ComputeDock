@@ -28,6 +28,7 @@ from computedock_monitor.models import (
     ProjectMember,
     RegistrationRequest,
     SmtpSetting,
+    SystemSetting,
     User,
     WorkerCheckpoint,
 )
@@ -67,6 +68,7 @@ def make_test_app(monkeypatch) -> tuple[TestClient, sessionmaker[Session]]:
             HourlyGpuRollup.__table__,
             NotificationOutbox.__table__,
             SmtpSetting.__table__,
+            SystemSetting.__table__,
             AuditEvent.__table__,
             WorkerCheckpoint.__table__,
         ],
@@ -378,6 +380,70 @@ def test_admin_can_save_and_test_smtp_without_password_disclosure(monkeypatch) -
     assert response.json() == {"status": "sent", "recipient": admin.email}
     assert sent["to_address"] == admin.email
     assert sent["connection"].password == "smtp-secret"  # type: ignore[union-attr]
+
+
+def test_admin_can_set_api_base_url_for_email_links(monkeypatch) -> None:
+    client, sessions = make_test_app(monkeypatch)
+    admin = seed_admin(sessions)
+    csrf = login(client, admin.username, "long-enough-admin-password")
+
+    response = client.get("/api/v1/settings/general")
+    assert response.status_code == 200
+    assert response.json() == {
+        "api_base_url": "https://monitor.example.test",
+        "source": "environment",
+    }
+
+    response = client.put(
+        "/api/v1/settings/general",
+        json={"api_base_url": "https://public.example.test/monitor/"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "api_base_url": "https://public.example.test/monitor",
+        "source": "database",
+    }
+
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "username": "base-url-user",
+            "full_name": "Base URL User",
+            "email": "base-url@example.test",
+            "password": "long-enough-user-password",
+        },
+    )
+    assert response.status_code == 202, response.text
+    with sessions() as db:
+        notice = db.scalar(
+            select(NotificationOutbox).where(
+                NotificationOutbox.template == "registration_verify"
+            )
+        )
+        assert notice is not None
+        assert notice.payload["action_url"].startswith(
+            "https://public.example.test/monitor/verify-email?token="
+        )
+
+
+def test_api_base_url_rejects_unsafe_values(monkeypatch) -> None:
+    client, sessions = make_test_app(monkeypatch)
+    admin = seed_admin(sessions)
+    csrf = login(client, admin.username, "long-enough-admin-password")
+
+    for value in (
+        "smtp://public.example.test",
+        "https://user:secret@public.example.test",
+        "https://public.example.test?redirect=other",
+        "https://public.example.test#fragment",
+    ):
+        response = client.put(
+            "/api/v1/settings/general",
+            json={"api_base_url": value},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert response.status_code == 422, response.text
 
 
 def test_resource_tokens_are_hidden_from_regular_users(monkeypatch) -> None:

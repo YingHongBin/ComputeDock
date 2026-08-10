@@ -13,7 +13,7 @@
    $EDITOR .env
    ```
 
-   `ADMIN_USERNAME`、`ADMIN_PASSWORD` 和 `ADMIN_EMAIL` 只用于首次创建管理员。后续账号资料和密码以数据库为准。邮件验证链接会基于 `PUBLIC_BASE_URL` 生成，生产环境必须设为用户实际访问的 HTTPS 地址。
+   `ADMIN_USERNAME`、`ADMIN_PASSWORD` 和 `ADMIN_EMAIL` 只用于首次创建管理员。后续账号资料和密码以数据库为准。设置页中的 `API Base URL` 决定邮件验证、密码重置和邮箱变更链接的基础地址；尚未保存数据库配置时回退到 `PUBLIC_BASE_URL`。生产环境必须使用用户实际访问的 HTTPS 地址，若部署在路径前缀下需包含该前缀，但不要包含 `/api/v1`。
 
 2. 启动全部服务：
 

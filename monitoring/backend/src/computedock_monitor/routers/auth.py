@@ -166,7 +166,7 @@ def register(
         to_address=registration.email,
         payload={
             "full_name": registration.full_name,
-            "action_url": action_url(settings, "/verify-email", secret),
+            "action_url": action_url(db, settings, "/verify-email", secret),
             "expires_hours": 24,
         },
     )
@@ -210,7 +210,7 @@ def resend_registration_verification(
             to_address=registration.email,
             payload={
                 "full_name": registration.full_name,
-                "action_url": action_url(settings, "/verify-email", secret),
+                "action_url": action_url(db, settings, "/verify-email", secret),
                 "expires_hours": 24,
             },
         )
@@ -381,7 +381,7 @@ def request_password_reset(
             to_address=user.email,
             payload={
                 "full_name": user.full_name,
-                "action_url": action_url(settings, "/reset-password", secret),
+                "action_url": action_url(db, settings, "/reset-password", secret),
                 "expires_minutes": 30,
             },
         )
@@ -463,7 +463,7 @@ def request_email_change(
         to_address=payload.new_email,
         payload={
             "full_name": auth.user.full_name,
-            "action_url": action_url(settings, "/verify-new-email", secret),
+            "action_url": action_url(db, settings, "/verify-new-email", secret),
             "expires_hours": 24,
         },
     )

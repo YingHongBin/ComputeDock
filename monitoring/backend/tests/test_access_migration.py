@@ -85,7 +85,16 @@ def test_migration_chain_contains_smtp_settings_revision() -> None:
         "0001_initial.py",
         "0002_access_requests.py",
         "0003_smtp_settings.py",
+        "0004_api_base_url.py",
     ]
+
+
+def test_api_base_url_is_added_after_smtp_settings() -> None:
+    migration = MIGRATION.with_name("0004_api_base_url.py")
+    content = migration.read_text(encoding="utf-8")
+    assert 'down_revision = "0003_smtp_settings"' in content
+    assert "CREATE TABLE system_settings" in content
+    assert "api_base_url varchar(2048)" in content
 
 
 def test_model_metadata_does_not_recreate_check_constraints() -> None:

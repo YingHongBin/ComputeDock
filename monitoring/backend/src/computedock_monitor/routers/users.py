@@ -256,7 +256,7 @@ def trigger_password_reset(
         to_address=user.email,
         payload={
             "full_name": user.full_name,
-            "action_url": action_url(settings, "/reset-password", secret),
+            "action_url": action_url(db, settings, "/reset-password", secret),
             "expires_minutes": 30,
         },
     )

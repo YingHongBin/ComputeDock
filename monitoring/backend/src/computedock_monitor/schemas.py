@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from typing import Literal
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -160,6 +161,31 @@ class SmtpSettingsView(BaseModel):
     from_name: str
     use_tls: bool
     password_set: bool
+    source: Literal["database", "environment"]
+
+
+class GeneralSettingsInput(BaseModel):
+    api_base_url: str = Field(min_length=1, max_length=2048)
+
+    @field_validator("api_base_url")
+    @classmethod
+    def validate_api_base_url(cls, value: str) -> str:
+        value = value.strip().rstrip("/")
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme not in ("http", "https")
+            or not parsed.netloc
+            or parsed.query
+            or parsed.fragment
+            or parsed.username
+            or parsed.password
+        ):
+            raise ValueError("must be an HTTP(S) base URL without query or fragment")
+        return value
+
+
+class GeneralSettingsView(BaseModel):
+    api_base_url: str
     source: Literal["database", "environment"]
 
 

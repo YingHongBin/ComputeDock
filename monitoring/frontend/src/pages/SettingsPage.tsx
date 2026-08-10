@@ -2,7 +2,12 @@ import { Alert, App, Button, Card, Form, Input, InputNumber, Space, Switch, Tag,
 import { useEffect, useState } from 'react'
 import { api, csrfHeaders, errorMessage } from '../api'
 import { useAuth } from '../auth'
-import type { SmtpSettingsData, SmtpSettingsInput } from '../types'
+import type {
+  GeneralSettingsData,
+  GeneralSettingsInput,
+  SmtpSettingsData,
+  SmtpSettingsInput,
+} from '../types'
 
 type SmtpFormValues = SmtpSettingsInput & { password?: string }
 
@@ -16,16 +21,23 @@ export function SettingsPage() {
   const { session } = useAuth()
   const { message } = App.useApp()
   const [form] = Form.useForm<SmtpFormValues>()
+  const [generalForm] = Form.useForm<GeneralSettingsInput>()
   const [settings, setSettings] = useState<SmtpSettingsData | null>(null)
+  const [generalSettings, setGeneralSettings] = useState<GeneralSettingsData | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [savingGeneral, setSavingGeneral] = useState(false)
   const [testing, setTesting] = useState(false)
 
   const load = async () => {
     setLoading(true)
     try {
-      const { data } = await api.get<SmtpSettingsData>('/settings/smtp')
+      const [{ data }, { data: generalData }] = await Promise.all([
+        api.get<SmtpSettingsData>('/settings/smtp'),
+        api.get<GeneralSettingsData>('/settings/general'),
+      ])
       setSettings(data)
+      setGeneralSettings(generalData)
       form.setFieldsValue({
         host: data.host,
         port: data.port,
@@ -35,6 +47,7 @@ export function SettingsPage() {
         from_name: data.from_name,
         use_tls: data.use_tls,
       })
+      generalForm.setFieldsValue({ api_base_url: generalData.api_base_url })
     } catch (error) {
       message.error(errorMessage(error))
     } finally {
@@ -43,6 +56,23 @@ export function SettingsPage() {
   }
 
   useEffect(() => { void load() }, [])
+
+  const saveGeneral = async (values: GeneralSettingsInput) => {
+    if (!session) return
+    setSavingGeneral(true)
+    try {
+      const { data } = await api.put<GeneralSettingsData>('/settings/general', values, {
+        headers: csrfHeaders(session.csrf_token),
+      })
+      setGeneralSettings(data)
+      generalForm.setFieldsValue({ api_base_url: data.api_base_url })
+      message.success('API Base URL 已保存')
+    } catch (error) {
+      message.error(errorMessage(error))
+    } finally {
+      setSavingGeneral(false)
+    }
+  }
 
   const save = async (values: SmtpFormValues) => {
     if (!session) return
@@ -83,8 +113,39 @@ export function SettingsPage() {
     <section>
       <div className="page-heading">
         <Typography.Title level={2}>设置</Typography.Title>
-        <Typography.Text type="secondary">管理系统邮件发送配置。</Typography.Text>
+        <Typography.Text type="secondary">管理系统访问地址和邮件发送配置。</Typography.Text>
       </div>
+      <Card
+        title={<Space>系统设置 {generalSettings && <Tag>{generalSettings.source === 'database' ? '数据库配置' : '环境变量配置'}</Tag>}</Space>}
+        loading={loading}
+        className="settings-card"
+      >
+        <Alert
+          type="info"
+          showIcon
+          message="API Base URL 是系统对外访问地址，注册验证、密码重置和邮箱变更邮件中的链接都基于该地址生成。不要填写 /api/v1。"
+          className="settings-alert"
+        />
+        <Form<GeneralSettingsInput>
+          form={generalForm}
+          layout="vertical"
+          onFinish={saveGeneral}
+          className="settings-form"
+        >
+          <Form.Item
+            name="api_base_url"
+            label="API Base URL"
+            rules={[
+              { required: true, whitespace: true },
+              { type: 'url', message: '请输入完整的 HTTP(S) 地址' },
+            ]}
+            extra="例如：https://monitor.example.com 或 https://example.com/monitor"
+          >
+            <Input maxLength={2048} placeholder="https://monitor.example.com" />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" loading={savingGeneral}>保存</Button>
+        </Form>
+      </Card>
       <Card
         title={<Space>SMTP 设置 {settings && <Tag>{settings.source === 'database' ? '数据库配置' : '环境变量配置'}</Tag>}</Space>}
         loading={loading}

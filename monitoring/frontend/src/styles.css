@@ -22,6 +22,7 @@ body { margin: 0; min-width: 320px; min-height: 100vh; }
 .page-heading h2, .chart-heading h3 { margin-bottom: 4px; }
 .settings-alert { margin-bottom: 24px; }
 .settings-form { max-width: 680px; }
+.settings-card { margin-bottom: 16px; }
 .detail-heading { margin-top: 12px; }
 .resource-card { height: 100%; border: 1px solid #e5eaf2; overflow: hidden; }
 .resource-card .ant-card-body { padding: 24px; }

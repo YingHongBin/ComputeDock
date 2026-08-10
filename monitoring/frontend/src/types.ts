@@ -114,6 +114,15 @@ export interface SmtpSettingsInput {
   use_tls: boolean
 }
 
+export interface GeneralSettingsData {
+  api_base_url: string
+  source: 'database' | 'environment'
+}
+
+export interface GeneralSettingsInput {
+  api_base_url: string
+}
+
 export interface ProjectMemberData {
   id: string
   username: string

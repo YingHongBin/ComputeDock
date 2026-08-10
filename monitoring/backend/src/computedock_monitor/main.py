@@ -85,7 +85,7 @@ def ensure_initial_admin() -> None:
                     to_address=user.email,
                     payload={
                         "full_name": user.full_name,
-                        "action_url": action_url(settings, "/verify-new-email", secret),
+                        "action_url": action_url(db, settings, "/verify-new-email", secret),
                         "expires_hours": 24,
                     },
                 )

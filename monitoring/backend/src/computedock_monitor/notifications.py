@@ -8,7 +8,7 @@ from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from .config import Settings
-from .models import EmailActionToken, NotificationOutbox, User
+from .models import EmailActionToken, NotificationOutbox, SystemSetting, User
 from .security import digest_secret, make_email_action_token, utcnow
 
 ACTION_TOKEN_LIFETIMES = {
@@ -80,8 +80,15 @@ def issue_action_token(
     return token, secret
 
 
-def action_url(settings: Settings, path: str, secret: str) -> str:
-    base = settings.public_base_url.rstrip("/")
+def effective_api_base_url(db: Session, settings: Settings) -> str:
+    saved = db.get(SystemSetting, 1)
+    if saved is not None and saved.api_base_url:
+        return saved.api_base_url.rstrip("/")
+    return settings.public_base_url.rstrip("/")
+
+
+def action_url(db: Session, settings: Settings, path: str, secret: str) -> str:
+    base = effective_api_base_url(db, settings)
     return f"{base}{path}?{urlencode({'token': secret})}"
 
 
