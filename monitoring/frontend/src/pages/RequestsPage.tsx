@@ -31,6 +31,8 @@ export function RequestsPage() {
   const [projects, setProjects] = useState<ProjectData[]>([])
   const [resources, setResources] = useState<ResourceCardData[]>([])
   const [loading, setLoading] = useState(true)
+  const [noticeOpen, setNoticeOpen] = useState(false)
+  const [noticeCountdown, setNoticeCountdown] = useState(3)
   const [requestOpen, setRequestOpen] = useState(false)
   const [changeTarget, setChangeTarget] = useState<ComputeRequestData | null>(null)
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
@@ -58,6 +60,23 @@ export function RequestsPage() {
   }
 
   useEffect(() => { void load() }, [])
+
+  useEffect(() => {
+    if (!noticeOpen || noticeCountdown <= 0) return
+    const timer = window.setTimeout(() => setNoticeCountdown((value) => value - 1), 1000)
+    return () => window.clearTimeout(timer)
+  }, [noticeOpen, noticeCountdown])
+
+  const showUsageNotice = () => {
+    setNoticeCountdown(3)
+    setNoticeOpen(true)
+  }
+
+  const acceptUsageNotice = () => {
+    if (noticeCountdown > 0) return
+    setNoticeOpen(false)
+    setRequestOpen(true)
+  }
 
   const availableProjects = projects.filter((project) =>
     project.status === 'active' && project.members.some((member) => member.username === session?.username))
@@ -158,7 +177,7 @@ export function RequestsPage() {
           <Typography.Title level={2}>算力申请</Typography.Title>
           <Typography.Text type="secondary">申请 GPU 资源，并跟踪延时、扩容和释放审核。</Typography.Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setRequestOpen(true)} disabled={!availableProjects.length || !availableResources.length}>新建申请</Button>
+        <Button type="primary" icon={<PlusOutlined />} onClick={showUsageNotice} disabled={!availableProjects.length || !availableResources.length}>新建申请</Button>
       </Flex>
       <Card>
         <Table
@@ -186,6 +205,24 @@ export function RequestsPage() {
           }}
         />
       </Card>
+
+      <Modal
+        title="算力资源使用须知"
+        open={noticeOpen}
+        onCancel={() => setNoticeOpen(false)}
+        onOk={acceptUsageNotice}
+        okButtonProps={{ disabled: noticeCountdown > 0 }}
+        okText={noticeCountdown > 0 ? `请阅读（${noticeCountdown} 秒）` : '我已阅读，继续申请'}
+        cancelText="取消"
+        destroyOnHidden
+      >
+        <ol className="usage-notice-list">
+          <li>算力申请原则上按照提交顺序依次审批；如遇论文 rebuttal 等紧急情况，请联系管理员说明。</li>
+          <li>每次申请的使用时间不得超过 14 天。</li>
+          <li>用户目录为持久化挂载目录，请将代码、数据和运行环境等内容统一存放在用户目录下。</li>
+          <li>长时间未使用的算力资源会被系统记录，并可能被关停；如仍有使用需求，请重新提交申请。</li>
+        </ol>
+      </Modal>
 
       <Modal title="新建算力申请" open={requestOpen} onCancel={() => setRequestOpen(false)} onOk={() => requestForm.submit()} confirmLoading={busy} destroyOnHidden>
         <Form form={requestForm} layout="vertical" onFinish={submitRequest} preserve={false}>
