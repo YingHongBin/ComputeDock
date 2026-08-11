@@ -1,4 +1,4 @@
-import { LogoutOutlined, MailOutlined } from '@ant-design/icons'
+import { LogoutOutlined } from '@ant-design/icons'
 import { Alert, App, Button, Form, Input, Layout, Modal, Space, Typography } from 'antd'
 import { useState } from 'react'
 import type { PropsWithChildren } from 'react'
@@ -10,31 +10,13 @@ export function AppShell({ children }: PropsWithChildren) {
   const { session, logout } = useAuth()
   const { message } = App.useApp()
   const { navigate, path } = useNavigation()
-  const [passwordOpen, setPasswordOpen] = useState(false)
   const [emailOpen, setEmailOpen] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [passwordForm] = Form.useForm()
   const [emailForm] = Form.useForm()
 
   const handleLogout = async () => {
     await logout()
     navigate('/login', { replace: true })
-  }
-
-  const changePassword = async (values: { current_password: string; new_password: string }) => {
-    setBusy(true)
-    try {
-      await api.post('/auth/password', values, {
-        headers: csrfHeaders(session?.csrf_token ?? ''),
-      })
-      message.success('密码已修改')
-      passwordForm.resetFields()
-      setPasswordOpen(false)
-    } catch (error) {
-      message.error(errorMessage(error))
-    } finally {
-      setBusy(false)
-    }
   }
 
   const changeEmail = async (values: { current_password: string; new_email: string }) => {
@@ -85,8 +67,6 @@ export function AppShell({ children }: PropsWithChildren) {
         </Space>
         <Space className="account-actions">
           <Typography.Text className="header-user">{session?.full_name}</Typography.Text>
-          <Button type="text" icon={<MailOutlined />} onClick={() => setEmailOpen(true)}>邮箱</Button>
-          <Button type="text" onClick={() => setPasswordOpen(true)}>密码</Button>
           <Button type="text" icon={<LogoutOutlined />} onClick={handleLogout}>退出</Button>
         </Space>
       </Layout.Header>
@@ -102,23 +82,6 @@ export function AppShell({ children }: PropsWithChildren) {
         )}
         {children}
       </Layout.Content>
-      <Modal
-        title="修改密码"
-        open={passwordOpen}
-        onCancel={() => setPasswordOpen(false)}
-        onOk={() => passwordForm.submit()}
-        confirmLoading={busy}
-        destroyOnHidden
-      >
-        <Form form={passwordForm} layout="vertical" onFinish={changePassword} preserve={false}>
-          <Form.Item name="current_password" label="当前密码" rules={[{ required: true }]}>
-            <Input.Password autoComplete="current-password" />
-          </Form.Item>
-          <Form.Item name="new_password" label="新密码" rules={[{ required: true }, { min: 12, message: '至少 12 个字符' }]}>
-            <Input.Password autoComplete="new-password" />
-          </Form.Item>
-        </Form>
-      </Modal>
       <Modal
         title="更换绑定邮箱"
         open={emailOpen}
