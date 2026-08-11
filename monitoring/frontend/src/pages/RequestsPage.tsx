@@ -198,7 +198,14 @@ export function RequestsPage() {
           <Form.Item name="gpu_count" label="需要 GPU 数量" rules={[{ required: true }]}>
             <InputNumber min={1} precision={0} className="full-width" />
           </Form.Item>
-          <Form.Item name="duration_days" label="需要天数" rules={[{ required: true }]}>
+          <Form.Item
+            name="duration_days"
+            label="需要天数"
+            rules={[
+              { required: true, message: '请填写需要天数' },
+              { type: 'number', min: 1, max: 14, message: '使用时长仅限1-14 天' },
+            ]}
+          >
             <InputNumber min={1} max={14} precision={0} className="full-width" />
           </Form.Item>
         </Form>
