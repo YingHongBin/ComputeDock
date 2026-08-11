@@ -54,12 +54,18 @@ MAIL_SUBJECTS = {
 def render_notification(notification: NotificationOutbox) -> tuple[str, str]:
     subject = MAIL_SUBJECTS.get(notification.template, "ComputeDock 通知")
     payload = notification.payload
-    lines = [f"您好，{payload.get('full_name') or payload.get('applicant_name') or '用户'}：", ""]
+    recipient_name = (
+        "管理员"
+        if notification.template == "compute_request_pending_admin"
+        else payload.get("full_name") or payload.get("applicant_name") or "用户"
+    )
+    lines = [f"您好，{recipient_name}：", ""]
     if action_url := payload.get("action_url"):
         lines.extend([subject, "", str(action_url)])
     else:
         lines.append(subject)
         for key, label in (
+            ("applicant_name", "申请人姓名"),
             ("project_name", "项目"),
             ("resource_name", "算力资源"),
             ("gpu_count", "GPU 数量"),

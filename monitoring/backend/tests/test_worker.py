@@ -29,3 +29,28 @@ def test_notification_renderer_includes_action_link() -> None:
     subject, body = render_notification(notification)
     assert subject == "重置您的 ComputeDock 密码"
     assert "https://monitor.example.test/reset-password?token=secret" in body
+
+
+def test_compute_request_admin_notice_includes_applicant_details() -> None:
+    notification = NotificationOutbox(
+        template="compute_request_pending_admin",
+        to_address="admin@example.test",
+        cc_addresses=[],
+        payload={
+            "applicant_name": "GPU Applicant",
+            "project_name": "GPU Project",
+            "resource_name": "H100 Cluster",
+            "gpu_count": 2,
+            "duration_days": 7,
+        },
+    )
+
+    subject, body = render_notification(notification)
+
+    assert subject == "有新的算力申请待审核"
+    assert "您好，管理员：" in body
+    assert "申请人姓名：GPU Applicant" in body
+    assert "项目：GPU Project" in body
+    assert "算力资源：H100 Cluster" in body
+    assert "GPU 数量：2" in body
+    assert "使用天数：7" in body
