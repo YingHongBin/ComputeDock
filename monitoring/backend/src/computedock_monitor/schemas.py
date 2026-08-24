@@ -194,7 +194,6 @@ class GeneralSettingsView(BaseModel):
 class ProjectInput(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=4000)
-    member_ids: list[uuid.UUID] = Field(default_factory=list)
 
     @field_validator("name")
     @classmethod
@@ -209,26 +208,11 @@ class ProjectInput(BaseModel):
     def strip_description(cls, value: str) -> str:
         return value.strip()
 
-    @field_validator("member_ids")
-    @classmethod
-    def unique_members(cls, value: list[uuid.UUID]) -> list[uuid.UUID]:
-        if len(value) != len(set(value)):
-            raise ValueError("member_ids must be unique")
-        return value
-
-
-class ProjectMemberView(BaseModel):
-    id: uuid.UUID
-    username: str
-    full_name: str
-
-
 class ProjectView(BaseModel):
     id: uuid.UUID
     name: str
     description: str
     status: Literal["active", "disabled"]
-    members: list[ProjectMemberView]
     created_at: datetime
 
 

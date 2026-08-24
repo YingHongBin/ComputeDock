@@ -78,8 +78,7 @@ export function RequestsPage() {
     setRequestOpen(true)
   }
 
-  const availableProjects = projects.filter((project) =>
-    project.status === 'active' && project.members.some((member) => member.username === session?.username))
+  const availableProjects = projects.filter((project) => project.status === 'active')
   const availableResources = resources.filter((resource) => resource.status === 'active')
 
   const submitRequest = async (values: Record<string, unknown>) => {

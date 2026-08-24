@@ -122,21 +122,6 @@ class Project(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
-class ProjectMember(Base):
-    __tablename__ = "project_members"
-
-    project_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), primary_key=True
-    )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("users.id", ondelete="RESTRICT"), primary_key=True
-    )
-    added_by_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
-    )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
 class ComputeResource(Base):
     __tablename__ = "compute_resources"
 

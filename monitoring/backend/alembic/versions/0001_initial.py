@@ -86,15 +86,6 @@ CREATE TABLE projects (
     updated_at timestamptz NOT NULL
 );
 
-CREATE TABLE project_members (
-    project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    user_id uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    added_by_id uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
-    created_at timestamptz NOT NULL,
-    PRIMARY KEY(project_id, user_id)
-);
-CREATE INDEX ix_project_members_user_id ON project_members(user_id);
-
 CREATE TABLE compute_resources (
     id uuid PRIMARY KEY,
     name varchar(200) NOT NULL UNIQUE,
@@ -342,7 +333,6 @@ def downgrade() -> None:
         "compute_request_changes",
         "compute_requests",
         "compute_resources",
-        "project_members",
         "projects",
         "email_action_tokens",
         "registration_requests",

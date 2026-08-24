@@ -3,79 +3,28 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import delete, select, update
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..auditing import record_audit
 from ..auth import AuthContext, require_admin_csrf, require_user
 from ..database import get_db
-from ..models import (
-    ComputeRequest,
-    ComputeRequestChange,
-    Project,
-    ProjectMember,
-    User,
-)
-from ..schemas import ProjectInput, ProjectMemberView, ProjectView
+from ..models import ComputeRequest, ComputeRequestChange, Project
+from ..schemas import ProjectInput, ProjectView
 from ..security import utcnow
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
 
 
-def project_members(db: Session, project_id: uuid.UUID) -> list[User]:
-    return list(
-        db.scalars(
-            select(User)
-            .join(ProjectMember, ProjectMember.user_id == User.id)
-            .where(ProjectMember.project_id == project_id)
-            .order_by(User.full_name, User.username)
-        )
-    )
-
-
-def project_view(db: Session, project: Project) -> ProjectView:
+def project_view(project: Project) -> ProjectView:
     return ProjectView(
         id=project.id,
         name=project.name,
         description=project.description,
         status=project.status,  # type: ignore[arg-type]
-        members=[
-            ProjectMemberView(id=user.id, username=user.username, full_name=user.full_name)
-            for user in project_members(db, project.id)
-        ],
         created_at=project.created_at,
     )
-
-
-def validated_members(db: Session, member_ids: list[uuid.UUID]) -> list[User]:
-    if not member_ids:
-        return []
-    users = list(
-        db.scalars(select(User).where(User.id.in_(member_ids), User.status == "active"))
-    )
-    if len(users) != len(member_ids):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "member not found or disabled")
-    return users
-
-
-def replace_members(
-    db: Session,
-    project: Project,
-    users: list[User],
-    actor: User,
-) -> None:
-    db.execute(delete(ProjectMember).where(ProjectMember.project_id == project.id))
-    now = utcnow()
-    for user in users:
-        db.add(
-            ProjectMember(
-                project_id=project.id,
-                user_id=user.id,
-                added_by_id=actor.id,
-                created_at=now,
-            )
-        )
 
 
 @router.get("", response_model=list[ProjectView])
@@ -85,16 +34,10 @@ def list_projects(
     db: Session = Depends(get_db),
 ) -> list[ProjectView]:
     query = select(Project)
-    if auth.user.role == "admin":
-        if not include_disabled:
-            query = query.where(Project.status == "active")
-    else:
-        query = query.join(ProjectMember).where(
-            ProjectMember.user_id == auth.user.id,
-            Project.status == "active",
-        )
+    if auth.user.role != "admin" or not include_disabled:
+        query = query.where(Project.status == "active")
     projects = list(db.scalars(query.order_by(Project.created_at.desc())))
-    return [project_view(db, project) for project in projects]
+    return [project_view(project) for project in projects]
 
 
 @router.post("", response_model=ProjectView, status_code=status.HTTP_201_CREATED)
@@ -103,7 +46,6 @@ def create_project(
     auth: AuthContext = Depends(require_admin_csrf),
     db: Session = Depends(get_db),
 ) -> ProjectView:
-    members = validated_members(db, payload.member_ids)
     now = utcnow()
     project = Project(
         id=uuid.uuid4(),
@@ -115,25 +57,20 @@ def create_project(
         updated_at=now,
     )
     db.add(project)
-    db.flush()
-    replace_members(db, project, members, auth.user)
     record_audit(
         db,
         auth.user,
         "project.create",
         "project",
         project.id,
-        after={
-            "name": project.name,
-            "member_ids": [str(user.id) for user in members],
-        },
+        after={"name": project.name, "description": project.description},
     )
     try:
         db.commit()
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Squad name already exists") from exc
-    return project_view(db, project)
+    return project_view(project)
 
 
 @router.put("/{project_id}", response_model=ProjectView)
@@ -146,17 +83,13 @@ def update_project(
     project = db.scalar(select(Project).where(Project.id == project_id).with_for_update())
     if project is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Squad not found")
-    old_members = [str(user.id) for user in project_members(db, project.id)]
-    members = validated_members(db, payload.member_ids)
     before = {
         "name": project.name,
         "description": project.description,
-        "member_ids": old_members,
     }
     project.name = payload.name
     project.description = payload.description
     project.updated_at = utcnow()
-    replace_members(db, project, members, auth.user)
     record_audit(
         db,
         auth.user,
@@ -167,7 +100,6 @@ def update_project(
         after={
             "name": project.name,
             "description": project.description,
-            "member_ids": [str(user.id) for user in members],
         },
     )
     try:
@@ -175,7 +107,7 @@ def update_project(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "Squad name already exists") from exc
-    return project_view(db, project)
+    return project_view(project)
 
 
 def reject_pending_for_project(
@@ -235,7 +167,7 @@ def set_project_status(
         after={"status": target_status},
     )
     db.commit()
-    return project_view(db, project)
+    return project_view(project)
 
 
 @router.post("/{project_id}/disable", response_model=ProjectView)

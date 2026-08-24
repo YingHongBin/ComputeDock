@@ -17,7 +17,6 @@ from ..models import (
     ComputeResource,
     ContainerInstance,
     Project,
-    ProjectMember,
     User,
 )
 from ..notifications import enqueue_admin_notice, enqueue_notification
@@ -31,15 +30,6 @@ from ..schemas import (
 from ..security import as_utc, digest_secret, make_compute_request_token, utcnow
 
 router = APIRouter(prefix="/api/v1/compute-requests", tags=["compute-requests"])
-
-
-def is_project_member(db: Session, project_id: uuid.UUID, user_id: uuid.UUID) -> bool:
-    return db.scalar(
-        select(ProjectMember.project_id).where(
-            ProjectMember.project_id == project_id,
-            ProjectMember.user_id == user_id,
-        )
-    ) is not None
 
 
 def request_relations(
@@ -65,10 +55,6 @@ def validate_request_relations(
         raise HTTPException(status.HTTP_409_CONFLICT, "Squad is disabled")
     if resource.disabled_at is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "resource is disabled")
-    if not is_project_member(db, project.id, applicant.id):
-        raise HTTPException(status.HTTP_409_CONFLICT, "applicant is not a Squad member")
-
-
 def actual_gpu_count(db: Session, request_id: uuid.UUID) -> int:
     containers = list(
         db.scalars(

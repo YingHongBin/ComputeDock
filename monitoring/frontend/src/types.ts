@@ -128,18 +128,11 @@ export interface GeneralSettingsInput {
   low_utilization_threshold: number
 }
 
-export interface ProjectMemberData {
-  id: string
-  username: string
-  full_name: string
-}
-
 export interface ProjectData {
   id: string
   name: string
   description: string
   status: 'active' | 'disabled'
-  members: ProjectMemberData[]
   created_at: string
 }
 

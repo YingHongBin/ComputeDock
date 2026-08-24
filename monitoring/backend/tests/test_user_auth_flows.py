@@ -25,7 +25,6 @@ from computedock_monitor.models import (
     HourlyGpuRollup,
     NotificationOutbox,
     Project,
-    ProjectMember,
     RegistrationRequest,
     SmtpSetting,
     SystemSetting,
@@ -63,7 +62,6 @@ def make_test_app(monkeypatch) -> tuple[TestClient, sessionmaker[Session]]:
             RegistrationRequest.__table__,
             EmailActionToken.__table__,
             Project.__table__,
-            ProjectMember.__table__,
             ComputeResource.__table__,
             ComputeRequest.__table__,
             ComputeRequestChange.__table__,
@@ -318,15 +316,15 @@ def test_disabling_user_revokes_web_session(monkeypatch) -> None:
     )
 
 
-def test_project_creator_is_not_implicitly_a_member(monkeypatch) -> None:
+def test_all_active_users_can_see_active_squads(monkeypatch) -> None:
     client, sessions = make_test_app(monkeypatch)
     admin = seed_admin(sessions)
     now = utcnow()
-    member = User(
+    user = User(
         id=uuid.uuid4(),
-        username="member",
-        full_name="Project Member",
-        email="member@example.test",
+        username="squad-user",
+        full_name="Squad User",
+        email="squad-user@example.test",
         email_verified_at=now,
         password_hash=hash_password("long-enough-user-password"),
         role="user",
@@ -335,7 +333,7 @@ def test_project_creator_is_not_implicitly_a_member(monkeypatch) -> None:
         updated_at=now,
     )
     with sessions() as db:
-        db.add(member)
+        db.add(user)
         db.commit()
     csrf = login(client, admin.username, "long-enough-admin-password")
     response = client.post(
@@ -343,20 +341,28 @@ def test_project_creator_is_not_implicitly_a_member(monkeypatch) -> None:
         json={
             "name": "Project One",
             "description": "",
-            "member_ids": [str(member.id)],
         },
         headers={"X-CSRF-Token": csrf},
     )
     assert response.status_code == 201, response.text
     assert "code" not in response.json()
-    assert [item["id"] for item in response.json()["members"]] == [str(member.id)]
+    assert "members" not in response.json()
     second = client.post(
         "/api/v1/projects",
-        json={"name": "Project Two", "description": "", "member_ids": []},
+        json={"name": "Project Two", "description": ""},
         headers={"X-CSRF-Token": csrf},
     )
     assert second.status_code == 201, second.text
     assert "code" not in second.json()
+    assert client.post(
+        f"/api/v1/projects/{second.json()['id']}/disable",
+        headers={"X-CSRF-Token": csrf},
+    ).status_code == 200
+    client.cookies.clear()
+    login(client, user.username, "long-enough-user-password")
+    visible = client.get("/api/v1/projects", params={"include_disabled": True})
+    assert visible.status_code == 200, visible.text
+    assert [item["name"] for item in visible.json()] == ["Project One"]
     with sessions() as db:
         internal_codes = list(db.scalars(select(Project.code)))
     assert len(internal_codes) == len(set(internal_codes)) == 2
@@ -748,14 +754,8 @@ def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatc
         created_at=now,
         updated_at=now,
     )
-    membership = ProjectMember(
-        project_id=project.id,
-        user_id=applicant.id,
-        added_by_id=admin.id,
-        created_at=now,
-    )
     with sessions() as db:
-        db.add_all([applicant, resource, project, membership])
+        db.add_all([applicant, resource, project])
         db.commit()
 
     applicant_csrf = login(client, applicant.username, "long-enough-user-password")
@@ -962,14 +962,8 @@ def test_admin_can_approve_own_compute_request(monkeypatch) -> None:
         created_at=now,
         updated_at=now,
     )
-    membership = ProjectMember(
-        project_id=project.id,
-        user_id=admin.id,
-        added_by_id=admin.id,
-        created_at=now,
-    )
     with sessions() as db:
-        db.add_all([resource, project, membership])
+        db.add_all([resource, project])
         db.commit()
 
     csrf = login(client, admin.username, "long-enough-admin-password")

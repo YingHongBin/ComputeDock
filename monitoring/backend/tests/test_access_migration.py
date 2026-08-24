@@ -16,7 +16,6 @@ def test_clean_schema_contains_all_business_tables() -> None:
         "registration_requests",
         "email_action_tokens",
         "projects",
-        "project_members",
         "compute_resources",
         "compute_requests",
         "compute_request_changes",
@@ -40,6 +39,8 @@ def test_clean_schema_has_no_legacy_compatibility_structures() -> None:
     assert "archived_at" not in content
     assert "uq_container_legacy" not in content
     assert "UPDATE container_instances" not in content
+    assert "CREATE TABLE project_members" not in content
+    assert "project_members" not in Base.metadata.tables
     resource_section = content.split("CREATE TABLE compute_resources", 1)[1].split(
         "CREATE TABLE compute_requests", 1
     )[0]

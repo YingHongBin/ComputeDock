@@ -93,10 +93,8 @@ def main() -> int:
         "POST",
         "/api/v1/projects",
         {
-            "code": f"smoke-{suffix}",
             "name": f"Smoke Squad {suffix}",
             "description": "自动冒烟测试数据",
-            "member_ids": [admin["id"]],
         },
         csrf_headers,
         201,

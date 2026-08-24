@@ -1,16 +1,15 @@
 import { EditOutlined, PlusOutlined } from '@ant-design/icons'
-import { App, Button, Card, Flex, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd'
+import { App, Button, Card, Flex, Form, Input, Modal, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useEffect, useState } from 'react'
 import { api, csrfHeaders, errorMessage } from '../api'
 import { useAuth } from '../auth'
-import type { ProjectData, UserData } from '../types'
+import type { ProjectData } from '../types'
 
 export function ProjectsPage() {
   const { session } = useAuth()
   const { message } = App.useApp()
   const [projects, setProjects] = useState<ProjectData[]>([])
-  const [users, setUsers] = useState<UserData[]>([])
   const [editing, setEditing] = useState<ProjectData | null | undefined>(undefined)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -19,12 +18,8 @@ export function ProjectsPage() {
   const load = async () => {
     setLoading(true)
     try {
-      const [projectResponse, userResponse] = await Promise.all([
-        api.get<ProjectData[]>('/projects', { params: { include_disabled: true } }),
-        api.get<UserData[]>('/users'),
-      ])
+      const projectResponse = await api.get<ProjectData[]>('/projects', { params: { include_disabled: true } })
       setProjects(projectResponse.data)
-      setUsers(userResponse.data)
     } catch (error) {
       message.error(errorMessage(error))
     } finally {
@@ -40,7 +35,6 @@ export function ProjectsPage() {
       form.setFieldsValue({
         name: project.name,
         description: project.description,
-        member_ids: project.members.map((member) => member.id),
       })
     } else form.resetFields()
   }
@@ -76,7 +70,6 @@ export function ProjectsPage() {
   const columns: ColumnsType<ProjectData> = [
     { title: 'Squad名称', dataIndex: 'name', width: 180 },
     { title: '说明', dataIndex: 'description', render: (value) => value || '--' },
-    { title: '成员', dataIndex: 'members', render: (members: ProjectData['members']) => <Space wrap>{members.length ? members.map((member) => <Tag key={member.id}>{member.full_name}</Tag>) : <Typography.Text type="secondary">暂无成员</Typography.Text>}</Space> },
     { title: '状态', dataIndex: 'status', width: 90, render: (value) => value === 'active' ? <Tag color="success">正常</Tag> : <Tag>已禁用</Tag> },
     { title: '操作', width: 170, render: (_, row) => <Space><Button size="small" icon={<EditOutlined />} onClick={() => openEditor(row)}>编辑</Button><Button size="small" onClick={() => void toggle(row)}>{row.status === 'active' ? '禁用' : '启用'}</Button></Space> },
   ]
@@ -86,7 +79,7 @@ export function ProjectsPage() {
       <Flex justify="space-between" align="center" className="page-heading">
         <div>
           <Typography.Title level={2}>Squad管理</Typography.Title>
-          <Typography.Text type="secondary">创建Squad并明确维护Squad成员。</Typography.Text>
+          <Typography.Text type="secondary">创建和维护所有用户可申请的Squad。</Typography.Text>
         </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => openEditor(null)}>新建Squad</Button>
       </Flex>
@@ -95,9 +88,6 @@ export function ProjectsPage() {
         <Form form={form} layout="vertical" onFinish={save} preserve={false}>
           <Form.Item name="name" label="Squad名称" rules={[{ required: true, whitespace: true }]}><Input maxLength={200} /></Form.Item>
           <Form.Item name="description" label="说明"><Input.TextArea rows={3} maxLength={4000} /></Form.Item>
-          <Form.Item name="member_ids" label="Squad成员" initialValue={[]}>
-            <Select mode="multiple" showSearch optionFilterProp="label" options={users.filter((user) => user.status === 'active').map((user) => ({ value: user.id, label: `${user.full_name} (${user.username})` }))} />
-          </Form.Item>
         </Form>
       </Modal>
     </section>
