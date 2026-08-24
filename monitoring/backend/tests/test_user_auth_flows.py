@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Generator
-from datetime import timedelta
+from datetime import UTC, date, datetime, timedelta
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -13,7 +13,6 @@ from sqlalchemy.pool import StaticPool
 from computedock_monitor.config import Settings, get_settings
 from computedock_monitor.database import get_db
 from computedock_monitor.models import (
-    Admin,
     AdminSession,
     AuditEvent,
     Base,
@@ -22,6 +21,7 @@ from computedock_monitor.models import (
     ComputeResource,
     ContainerInstance,
     EmailActionToken,
+    GpuSample,
     HourlyGpuRollup,
     NotificationOutbox,
     Project,
@@ -41,8 +41,12 @@ from computedock_monitor.routers import (
     users,
 )
 from computedock_monitor.routers import settings as settings_router
-from computedock_monitor.security import digest_secret, hash_password, utcnow
+from computedock_monitor.security import hash_password, utcnow, verify_password
 from computedock_monitor.services import authenticate_reporting_token
+from computedock_monitor.worker import (
+    enqueue_low_utilization_warnings,
+    summarize_pending_containers,
+)
 
 
 def make_test_app(monkeypatch) -> tuple[TestClient, sessionmaker[Session]]:
@@ -54,7 +58,6 @@ def make_test_app(monkeypatch) -> tuple[TestClient, sessionmaker[Session]]:
     Base.metadata.create_all(
         engine,
         tables=[
-            Admin.__table__,
             User.__table__,
             AdminSession.__table__,
             RegistrationRequest.__table__,
@@ -83,6 +86,8 @@ def make_test_app(monkeypatch) -> tuple[TestClient, sessionmaker[Session]]:
         database_url="sqlite://",
         admin_username="admin",
         admin_password="long-enough-admin-password",
+        admin_full_name="Administrator",
+        admin_email="admin@example.test",
         cookie_secure=False,
         public_base_url="https://monitor.example.test",
     )
@@ -114,7 +119,6 @@ def seed_admin(sessions: sessionmaker[Session]) -> User:
         password_hash=hash_password("long-enough-admin-password"),
         role="admin",
         status="active",
-        must_bind_email=False,
         created_at=now,
         updated_at=now,
     )
@@ -128,6 +132,35 @@ def login(client: TestClient, username: str, password: str) -> str:
     response = client.post("/api/v1/auth/login", json={"username": username, "password": password})
     assert response.status_code == 200, response.text
     return response.json()["csrf_token"]
+
+
+def test_initial_admin_is_a_verified_user(monkeypatch) -> None:
+    from computedock_monitor import main as main_module
+
+    _client, sessions = make_test_app(monkeypatch)
+    settings = Settings(
+        database_url="sqlite://",
+        admin_username="InitialAdmin",
+        admin_password="long-enough-initial-password",
+        admin_full_name="Initial Administrator",
+        admin_email="Initial.Admin@Example.Test",
+    )
+    monkeypatch.setattr(main_module, "SessionLocal", sessions)
+    monkeypatch.setattr(main_module, "get_settings", lambda: settings)
+
+    main_module.ensure_initial_admin()
+
+    with sessions() as db:
+        users_in_database = list(db.scalars(select(User)))
+        assert len(users_in_database) == 1
+        admin = users_in_database[0]
+        assert admin.username == "InitialAdmin"
+        assert admin.full_name == "Initial Administrator"
+        assert admin.email == "initial.admin@example.test"
+        assert admin.email_verified_at is not None
+        assert admin.role == "admin"
+        assert admin.status == "active"
+        assert verify_password(admin.password_hash, "long-enough-initial-password")
 
 
 def test_verified_registration_requires_admin_approval(monkeypatch) -> None:
@@ -200,14 +233,20 @@ def test_registration_verification_can_be_resent_and_invalidates_old_link(monkey
         json={"identity": "RESEND@EXAMPLE.TEST"},
     )
     assert response.status_code == 202
-    assert client.post(
-        "/api/v1/auth/verify-email",
-        json={"token": "first-registration-token-with-enough-length"},
-    ).status_code == 400
-    assert client.post(
-        "/api/v1/auth/verify-email",
-        json={"token": "second-registration-token-with-enough-length"},
-    ).status_code == 204
+    assert (
+        client.post(
+            "/api/v1/auth/verify-email",
+            json={"token": "first-registration-token-with-enough-length"},
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            "/api/v1/auth/verify-email",
+            json={"token": "second-registration-token-with-enough-length"},
+        ).status_code
+        == 204
+    )
     with sessions() as db:
         notices = list(
             db.scalars(
@@ -254,7 +293,6 @@ def test_disabling_user_revokes_web_session(monkeypatch) -> None:
         password_hash=hash_password("long-enough-user-password"),
         role="user",
         status="active",
-        must_bind_email=False,
         created_at=now,
         updated_at=now,
     )
@@ -271,10 +309,13 @@ def test_disabling_user_revokes_web_session(monkeypatch) -> None:
     )
     assert response.status_code == 200
     client.cookies.clear()
-    assert client.post(
-        "/api/v1/auth/login",
-        json={"username": "bob", "password": "long-enough-user-password"},
-    ).status_code == 403
+    assert (
+        client.post(
+            "/api/v1/auth/login",
+            json={"username": "bob", "password": "long-enough-user-password"},
+        ).status_code
+        == 403
+    )
 
 
 def test_project_creator_is_not_implicitly_a_member(monkeypatch) -> None:
@@ -290,7 +331,6 @@ def test_project_creator_is_not_implicitly_a_member(monkeypatch) -> None:
         password_hash=hash_password("long-enough-user-password"),
         role="user",
         status="active",
-        must_bind_email=False,
         created_at=now,
         updated_at=now,
     )
@@ -391,17 +431,25 @@ def test_admin_can_set_api_base_url_for_email_links(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json() == {
         "api_base_url": "https://monitor.example.test",
+        "low_utilization_warning_enabled": True,
+        "low_utilization_threshold": 10,
         "source": "environment",
     }
 
     response = client.put(
         "/api/v1/settings/general",
-        json={"api_base_url": "https://public.example.test/monitor/"},
+        json={
+            "api_base_url": "https://public.example.test/monitor/",
+            "low_utilization_warning_enabled": True,
+            "low_utilization_threshold": 15,
+        },
         headers={"X-CSRF-Token": csrf},
     )
     assert response.status_code == 200, response.text
     assert response.json() == {
         "api_base_url": "https://public.example.test/monitor",
+        "low_utilization_warning_enabled": True,
+        "low_utilization_threshold": 15,
         "source": "database",
     }
 
@@ -417,14 +465,182 @@ def test_admin_can_set_api_base_url_for_email_links(monkeypatch) -> None:
     assert response.status_code == 202, response.text
     with sessions() as db:
         notice = db.scalar(
-            select(NotificationOutbox).where(
-                NotificationOutbox.template == "registration_verify"
-            )
+            select(NotificationOutbox).where(NotificationOutbox.template == "registration_verify")
         )
         assert notice is not None
         assert notice.payload["action_url"].startswith(
             "https://public.example.test/monitor/verify-email?token="
         )
+
+
+def test_low_utilization_warnings_group_containers_by_request(monkeypatch) -> None:
+    _client, sessions = make_test_app(monkeypatch)
+    admin = seed_admin(sessions)
+    target_day = date(2026, 8, 10)
+    window_start = datetime(2026, 8, 9, 16, tzinfo=UTC)
+    first_reported = window_start + timedelta(minutes=10)
+    container_specs = (
+        ("training-a", 5.0, window_start + timedelta(hours=14)),
+        ("training-b", 8.0, window_start + timedelta(hours=14)),
+        ("too-short", 2.0, window_start + timedelta(hours=11)),
+        ("at-threshold", 10.0, window_start + timedelta(hours=14)),
+    )
+    applicant = User(
+        id=uuid.uuid4(),
+        username="low-usage-user",
+        full_name="Low Usage User",
+        email="low-usage@example.test",
+        email_verified_at=window_start,
+        password_hash=hash_password("long-enough-user-password"),
+        role="user",
+        status="active",
+        created_at=window_start,
+        updated_at=window_start,
+    )
+    resource = ComputeResource(
+        id=uuid.uuid4(),
+        name="Low Usage Cluster",
+        gpu_model="H100",
+        gpu_count=8,
+        created_at=window_start,
+        updated_at=window_start,
+    )
+    project = Project(
+        id=uuid.uuid4(),
+        name="Low Usage Project",
+        description="",
+        status="active",
+        created_by_id=admin.id,
+        created_at=window_start,
+        updated_at=window_start,
+    )
+    request = ComputeRequest(
+        id=uuid.uuid4(),
+        applicant_id=applicant.id,
+        project_id=project.id,
+        resource_id=resource.id,
+        gpu_count=4,
+        duration_days=7,
+        approval_status="approved",
+        created_at=window_start,
+        updated_at=window_start,
+    )
+    containers = [
+        ContainerInstance(
+            id=uuid.uuid4(),
+            resource_id=resource.id,
+            compute_request_id=request.id,
+            name=name,
+            generation=1,
+            first_reported_at=first_reported,
+            last_received_at=last_reported,
+            latest_collected_at=last_reported,
+            current_gpu_ids=["GPU-1", "GPU-2"],
+        )
+        for name, _utilization, last_reported in container_specs
+    ]
+    with sessions() as db:
+        db.add_all([applicant, resource, project, request, *containers])
+        db.flush()
+        rollup_id = 1
+        for container, (_name, utilization, last_reported) in zip(
+            containers, container_specs, strict=True
+        ):
+            for gpuid in ("GPU-1", "GPU-2"):
+                db.add(
+                    HourlyGpuRollup(
+                        id=rollup_id,
+                        bucket_start=window_start,
+                        resource_id=resource.id,
+                        compute_request_id=request.id,
+                        container_id=container.id,
+                        gpuid=gpuid,
+                        utilization_avg=utilization,
+                        utilization_max=int(utilization),
+                        memory_used_avg=1024,
+                        memory_used_max=1024,
+                        memory_total=81920,
+                        online_seconds=3600,
+                        sample_count=2,
+                        first_collected_at=first_reported,
+                        last_collected_at=last_reported,
+                        created_at=window_start,
+                        updated_at=window_start,
+                    )
+                )
+                rollup_id += 1
+        db.commit()
+    engine = sessions.kw["bind"]
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE gpu_samples (
+                id bigint,
+                collected_at datetime NOT NULL,
+                received_at datetime NOT NULL,
+                batch_id char(32) NOT NULL,
+                resource_id char(32) NOT NULL,
+                container_id char(32) NOT NULL,
+                gpuid varchar(160) NOT NULL,
+                memory_used bigint NOT NULL,
+                memory_total bigint NOT NULL,
+                utilization integer NOT NULL
+            )
+            """
+        )
+    with sessions() as db:
+        sample_id = 1
+        for container, (_name, _utilization, last_reported) in zip(
+            containers, container_specs, strict=True
+        ):
+            for gpuid in ("GPU-1", "GPU-2"):
+                for collected_at in (first_reported, last_reported):
+                    db.execute(
+                        GpuSample.__table__.insert().values(
+                            id=sample_id,
+                            collected_at=collected_at,
+                            received_at=collected_at,
+                            batch_id=uuid.uuid4(),
+                            resource_id=resource.id,
+                            container_id=container.id,
+                            gpuid=gpuid,
+                            memory_used=1024,
+                            memory_total=81920,
+                            utilization=5,
+                        )
+                    )
+                    sample_id += 1
+        db.commit()
+        assert (
+            enqueue_low_utilization_warnings(
+                db,
+                target_day,
+                Settings(
+                    database_url="sqlite://",
+                    admin_username="admin",
+                    admin_password="long-enough-admin-password",
+                    admin_full_name="Administrator",
+                    admin_email="admin@example.test",
+                ),
+                threshold=10,
+            )
+            == 1
+        )
+        notices = list(
+            db.scalars(
+                select(NotificationOutbox).where(
+                    NotificationOutbox.template == "low_utilization_warning"
+                )
+            )
+        )
+        assert len(notices) == 1
+        assert notices[0].to_address == applicant.email
+        assert notices[0].cc_addresses == [admin.email]
+        assert [item["name"] for item in notices[0].payload["containers"]] == [
+            "training-a",
+            "training-b",
+        ]
+        assert all(item["gpu_count"] == 2 for item in notices[0].payload["containers"])
 
 
 def test_api_base_url_rejects_unsafe_values(monkeypatch) -> None:
@@ -445,8 +661,19 @@ def test_api_base_url_rejects_unsafe_values(monkeypatch) -> None:
         )
         assert response.status_code == 422, response.text
 
+    response = client.put(
+        "/api/v1/settings/general",
+        json={
+            "api_base_url": "https://public.example.test",
+            "low_utilization_warning_enabled": True,
+            "low_utilization_threshold": 101,
+        },
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert response.status_code == 422, response.text
 
-def test_resource_tokens_are_hidden_from_regular_users(monkeypatch) -> None:
+
+def test_resources_do_not_have_reporting_tokens(monkeypatch) -> None:
     client, sessions = make_test_app(monkeypatch)
     admin = seed_admin(sessions)
     now = utcnow()
@@ -459,22 +686,19 @@ def test_resource_tokens_are_hidden_from_regular_users(monkeypatch) -> None:
         password_hash=hash_password("long-enough-user-password"),
         role="user",
         status="active",
-        must_bind_email=False,
         created_at=now,
         updated_at=now,
     )
-    legacy = ComputeResource(
+    resource = ComputeResource(
         id=uuid.uuid4(),
-        name="legacy",
+        name="existing",
         gpu_model="A100",
         gpu_count=8,
-        token_hash=digest_secret("cdr_legacy"),
-        token="cdr_legacy",
         created_at=now,
         updated_at=now,
     )
     with sessions() as db:
-        db.add_all([user, legacy])
+        db.add_all([user, resource])
         db.commit()
     csrf = login(client, admin.username, "long-enough-admin-password")
     response = client.post(
@@ -483,16 +707,12 @@ def test_resource_tokens_are_hidden_from_regular_users(monkeypatch) -> None:
         headers={"X-CSRF-Token": csrf},
     )
     assert response.status_code == 201
-    assert response.json()["token"] is None
+    assert "token" not in response.json()
     client.cookies.clear()
     login(client, user.username, "long-enough-user-password")
     response = client.get("/api/v1/resources")
     assert response.status_code == 200
-    assert all(item["token"] is None for item in response.json())
-    with sessions() as db:
-        token_resource, token_request = authenticate_reporting_token(db, "cdr_legacy")
-        assert token_resource.id == legacy.id
-        assert token_request is None
+    assert all("token" not in item for item in response.json())
 
 
 def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatch) -> None:
@@ -508,7 +728,6 @@ def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatc
         password_hash=hash_password("long-enough-user-password"),
         role="user",
         status="active",
-        must_bind_email=False,
         created_at=now,
         updated_at=now,
     )
@@ -565,9 +784,7 @@ def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatc
     assert response.json()["token"].startswith("cda_")
     approved_token = response.json()["token"]
     with sessions() as db:
-        token_resource, token_request = authenticate_reporting_token(
-            db, response.json()["token"]
-        )
+        token_resource, token_request = authenticate_reporting_token(db, response.json()["token"])
         assert token_resource.id == resource.id
         assert token_request is not None
         assert str(token_request.id) == request_id
@@ -631,6 +848,7 @@ def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatc
             latest_collected_at=now,
             current_gpu_ids=["GPU-1"],
             removed_at=now,
+            usage_summary_status="pending",
         )
         db.add(container)
         db.flush()
@@ -655,10 +873,40 @@ def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatc
                 updated_at=now,
             )
         )
+        db.add(
+            WorkerCheckpoint(
+                name="hourly_rollups",
+                completed_through=now.date() + timedelta(days=1),
+                updated_at=now,
+            )
+        )
         db.commit()
+        assert (
+            summarize_pending_containers(
+                db,
+                Settings(
+                    database_url="sqlite://",
+                    admin_username="admin",
+                    admin_password="long-enough-admin-password",
+                    admin_full_name="Administrator",
+                    admin_email="admin@example.test",
+                ),
+            )
+            == 1
+        )
+        db.refresh(container)
+        assert container.usage_summary_status == "completed"
+        assert container.usage_duration_seconds == 0
+        assert container.usage_gpu_count == 1
+        assert container.usage_gpu_utilization_avg == 40.0
+        assert container.usage_gpu_utilization_max == 80
+        assert container.usage_memory_utilization_avg == 1.25
+        assert container.usage_memory_utilization_max == 2.5
     response = client.get(f"/api/v1/history/containers?user_id={applicant.id}")
     assert response.status_code == 200, response.text
     assert response.json()[0]["name"] == "worker-01"
+    assert response.json()[0]["usage_summary_status"] == "completed"
+    assert response.json()[0]["usage_gpu_utilization_avg"] == 40.0
     response = client.get(f"/api/v1/history/containers/{container.id}/chart")
     assert response.status_code == 200, response.text
     assert response.json()["series"][0]["points"][0]["utilization_max"] == 80
@@ -672,14 +920,20 @@ def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatc
     response = client.get(f"/api/v1/compute-requests/{pending_request_id}")
     assert response.json()["approval_status"] == "rejected"
     assert response.json()["review_comment"] == "关联用户已禁用"
-    assert client.post(
-        f"/api/v1/projects/{project.id}/disable",
-        headers={"X-CSRF-Token": admin_csrf},
-    ).status_code == 200
-    assert client.post(
-        f"/api/v1/resources/{resource.id}/disable",
-        headers={"X-CSRF-Token": admin_csrf},
-    ).status_code == 200
+    assert (
+        client.post(
+            f"/api/v1/projects/{project.id}/disable",
+            headers={"X-CSRF-Token": admin_csrf},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            f"/api/v1/resources/{resource.id}/disable",
+            headers={"X-CSRF-Token": admin_csrf},
+        ).status_code
+        == 200
+    )
     with sessions() as db:
         token_resource, token_request = authenticate_reporting_token(db, approved_token)
         assert token_resource.id == resource.id

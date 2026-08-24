@@ -10,7 +10,15 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .models import ComputeRequest, ComputeResource, ContainerInstance, GpuSample, SampleBatch
+from .models import (
+    ComputeRequest,
+    ComputeResource,
+    ContainerInstance,
+    GpuSample,
+    Project,
+    SampleBatch,
+    User,
+)
 from .schemas import (
     ChartPoint,
     ChartResponse,
@@ -40,8 +48,6 @@ def aligned_chart_window(
 def resource_card(
     resource: ComputeResource,
     containers: list[ContainerInstance],
-    *,
-    include_token: bool = True,
 ) -> ResourceCard:
     allocated = len(
         {
@@ -60,7 +66,6 @@ def resource_card(
         available_gpu_count=max(resource.gpu_count - allocated, 0),
         overallocated=allocated > resource.gpu_count,
         status="disabled" if resource.disabled_at is not None else "active",
-        token=resource.token if include_token else None,
     )
 
 
@@ -85,14 +90,7 @@ def validate_collection_time(collected_at: datetime, now: datetime) -> datetime:
     return normalized
 
 
-def authenticate_resource(db: Session, token: str) -> ComputeResource:
-    resource, _request = authenticate_reporting_token(db, token)
-    return resource
-
-
-def authenticate_reporting_token(
-    db: Session, token: str
-) -> tuple[ComputeResource, ComputeRequest | None]:
+def authenticate_reporting_token(db: Session, token: str) -> tuple[ComputeResource, ComputeRequest]:
     token_hash = digest_secret(token)
     request = db.scalar(
         select(ComputeRequest).where(
@@ -100,15 +98,12 @@ def authenticate_reporting_token(
             ComputeRequest.approval_status == "approved",
         )
     )
-    if request is not None:
-        resource = db.get(ComputeResource, request.resource_id)
-        if resource is None:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid reporting token")
-        return resource, request
-    resource = db.scalar(select(ComputeResource).where(ComputeResource.token_hash == token_hash))
+    if request is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid reporting token")
+    resource = db.get(ComputeResource, request.resource_id)
     if resource is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid reporting token")
-    return resource, None
+    return resource, request
 
 
 def lock_resource_lifecycle(db: Session, resource_id: uuid.UUID) -> None:
@@ -132,19 +127,12 @@ def start_compute_request(request: ComputeRequest, received_at: datetime) -> boo
 def get_or_create_container(
     db: Session,
     resource: ComputeResource,
-    request: ComputeRequest | None,
+    request: ComputeRequest,
     name: str,
     collected_at: datetime,
     received_at: datetime,
 ) -> ContainerInstance:
-    namespace_filters = (
-        [ContainerInstance.compute_request_id == request.id]
-        if request is not None
-        else [
-            ContainerInstance.resource_id == resource.id,
-            ContainerInstance.compute_request_id.is_(None),
-        ]
-    )
+    namespace_filters = [ContainerInstance.compute_request_id == request.id]
     container = db.scalar(
         select(ContainerInstance)
         .where(
@@ -165,7 +153,7 @@ def get_or_create_container(
     container = ContainerInstance(
         id=uuid.uuid4(),
         resource_id=resource.id,
-        compute_request_id=request.id if request else None,
+        compute_request_id=request.id,
         name=name,
         generation=int(generation or 0) + 1,
         first_reported_at=collected_at,
@@ -182,16 +170,15 @@ def ingest_sample(
     db: Session,
     resource: ComputeResource,
     payload: SampleInput,
-    request: ComputeRequest | None = None,
+    request: ComputeRequest,
 ) -> tuple[str, ContainerInstance]:
     received_at = utcnow()
     collected_at = validate_collection_time(payload.collected_at, received_at)
     payload = payload.model_copy(update={"collected_at": collected_at})
     lock_resource_lifecycle(db, resource.id)
     db.refresh(resource)
-    if request is not None:
-        db.refresh(request)
-        start_compute_request(request, received_at)
+    db.refresh(request)
+    start_compute_request(request, received_at)
     container = get_or_create_container(
         db, resource, request, payload.container_name, collected_at, received_at
     )
@@ -243,14 +230,7 @@ def ingest_sample(
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        namespace_filters = (
-            [ContainerInstance.compute_request_id == request.id]
-            if request is not None
-            else [
-                ContainerInstance.resource_id == resource.id,
-                ContainerInstance.compute_request_id.is_(None),
-            ]
-        )
+        namespace_filters = [ContainerInstance.compute_request_id == request.id]
         concurrent_container = db.scalar(
             select(ContainerInstance).where(
                 *namespace_filters,
@@ -322,25 +302,41 @@ def container_summaries(
     )
     usage = {row.container_id: row for row in rows}
     threshold = utcnow() - timedelta(seconds=offline_seconds)
-    return [
-        ContainerSummary(
-            id=container.id,
-            name=container.name,
-            generation=container.generation,
-            status="online" if container.last_received_at >= threshold else "offline",
-            last_received_at=container.last_received_at,
-            allocated_gpu_count=len(container.current_gpu_ids),
-            utilization_1h=_rounded(getattr(usage.get(container.id), "utilization_1h", None)),
-            utilization_6h=_rounded(getattr(usage.get(container.id), "utilization_6h", None)),
-            utilization_1d=_rounded(getattr(usage.get(container.id), "utilization_1d", None)),
-            utilization_7d=_rounded(getattr(usage.get(container.id), "utilization_7d", None)),
+    result: list[ContainerSummary] = []
+    for container in containers:
+        project_name, applicant_name = container_context(db, container)
+        result.append(
+            ContainerSummary(
+                id=container.id,
+                name=container.name,
+                project_name=project_name,
+                applicant_name=applicant_name,
+                generation=container.generation,
+                status="online" if container.last_received_at >= threshold else "offline",
+                last_received_at=container.last_received_at,
+                allocated_gpu_count=len(container.current_gpu_ids),
+                utilization_1h=_rounded(getattr(usage.get(container.id), "utilization_1h", None)),
+                utilization_6h=_rounded(getattr(usage.get(container.id), "utilization_6h", None)),
+                utilization_1d=_rounded(getattr(usage.get(container.id), "utilization_1d", None)),
+                utilization_7d=_rounded(getattr(usage.get(container.id), "utilization_7d", None)),
+            )
         )
-        for container in containers
-    ]
+    return result
 
 
 def _rounded(value: float | None) -> float | None:
     return None if value is None else round(float(value), 2)
+
+
+def container_context(db: Session, container: ContainerInstance) -> tuple[str, str]:
+    request = db.get(ComputeRequest, container.compute_request_id)
+    if request is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "compute request not found")
+    project = db.get(Project, request.project_id)
+    applicant = db.get(User, request.applicant_id)
+    if project is None or applicant is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "container context not found")
+    return project.name, applicant.full_name
 
 
 def chart_data(
@@ -352,6 +348,7 @@ def chart_data(
     if range_name not in RANGES:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "invalid chart range")
     duration, bucket_seconds = RANGES[range_name]
+    project_name, applicant_name = container_context(db, container)
     start, end = aligned_chart_window(utcnow(), duration, bucket_seconds)
     gpu_ids = set(container.current_gpu_ids)
     gpu_ids.update(
@@ -436,6 +433,8 @@ def chart_data(
     return ChartResponse(
         container_id=container.id,
         container_name=container.name,
+        project_name=project_name,
+        applicant_name=applicant_name,
         range=range_name,  # type: ignore[arg-type]
         bucket_seconds=bucket_seconds,
         window_start=start,

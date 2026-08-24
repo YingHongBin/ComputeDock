@@ -23,7 +23,8 @@ export function HistoryContainerPage({ containerId }: { containerId: string }) {
     <section>
       <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => window.history.back()}>返回</Button>
       <div className="page-heading">
-        <Typography.Title level={2}>{data?.container_name ?? '历史容器'}</Typography.Title>
+        <Typography.Title level={2}>{data ? `${data.project_name} · ${data.applicant_name}` : '历史容器'}</Typography.Title>
+        {data && <Typography.Text type="secondary">内部容器：{data.container_name}</Typography.Text>}
         {data && <Typography.Text type="secondary">首次上报 {dayjs(data.first_reported_at).format('YYYY-MM-DD HH:mm:ss')} · 移除 {dayjs(data.removed_at).format('YYYY-MM-DD HH:mm:ss')}</Typography.Text>}
       </div>
       {!data?.series.length ? <Empty description="暂无已聚合的小时数据" /> : (

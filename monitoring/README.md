@@ -13,7 +13,7 @@
    $EDITOR .env
    ```
 
-   `ADMIN_USERNAME`、`ADMIN_PASSWORD` 和 `ADMIN_EMAIL` 只用于首次创建管理员。后续账号资料和密码以数据库为准。设置页中的 `API Base URL` 决定邮件验证、密码重置和邮箱变更链接的基础地址；尚未保存数据库配置时回退到 `PUBLIC_BASE_URL`。生产环境必须使用用户实际访问的 HTTPS 地址，若部署在路径前缀下需包含该前缀，但不要包含 `/api/v1`。
+   `ADMIN_USERNAME`、`ADMIN_PASSWORD`、`ADMIN_FULL_NAME` 和 `ADMIN_EMAIL` 均为必填项，只用于首次创建管理员。初始管理员邮箱会直接标记为已验证；后续账号资料和密码以数据库为准。设置页中的 `API Base URL` 决定邮件验证、密码重置和邮箱变更链接的基础地址；尚未保存数据库配置时回退到 `PUBLIC_BASE_URL`。
 
 2. 启动全部服务：
 
@@ -39,7 +39,7 @@
 - 申请从首个容器首次成功上报开始计时。到期前一天显示提醒标签并向申请人发邮件，同时抄送所有有效管理员；到期后继续接收该 Token 的上报。
 - 禁用用户、项目或资源只会自动拒绝仍在申请中的请求和变更，不影响已经通过的申请或 Token。资源“删除”统一采用禁用语义，并可重新启用。
 
-普通用户不能查看或复制任何 Token。管理员可重复复制已通过申请的 Token；Token 明文保存、不支持重置，也不记录复制行为。新建资源不再创建资源级 Token，升级前已有资源 Token 继续有效。
+普通用户不能查看或复制任何 Token。管理员可重复复制已通过申请的 Token；Token 明文保存、不支持重置，也不记录复制行为。算力资源不创建资源级 Token，Agent 只能使用已通过申请的 Token。
 
 ## Agent 上报
 
@@ -55,7 +55,7 @@ computedock-agent run \
 
 同一申请中的 GPU UUID 会去重计算实际使用卡数；超过申请卡数时只提示超额，不拒绝数据。多个容器使用同一 UUID 时，各容器曲线仍然独立。容器超过 120 秒没有成功请求会显示失联，但仍计入实际使用，直到管理员移除。移除后同名容器再次上报会创建新的容器代次。
 
-升级前已存在、无法关联到真实用户和项目的容器会完整保留，不伪造归属，也不支持事后修改归属；只有仍在运行的未归属容器会出现在当前资源详情中。
+所有容器必须绑定算力申请。页面主要显示项目名称和申请人姓名，Agent 上传的容器名称作为同一申请内的内部实例标识展示。
 
 ## 反向代理
 
@@ -87,11 +87,21 @@ location /monitor/ {
 
 通用 app location 中 `proxy_pass` 末尾的 `/` 负责移除外部前缀，不能省略。应用会根据 `X-Forwarded-Prefix` 生成静态资源、管理 API、前端路由和 Cookie 路径。
 
-## 升级顺序与数据兼容
+## 全新部署与独立服务更新
 
 app、collector 和 worker 使用独立构建目标、镜像和版本标签，运行时都只依赖 database，可以分别更新。`APP_IMAGE_TAG`、`COLLECTOR_IMAGE_TAG` 和 `WORKER_IMAGE_TAG` 可单独指定；未指定时均回退到 `MONITORING_IMAGE_TAG`。
 
-数据库迁移由 app 在启动管理服务前执行，collector 和 worker 不执行 Alembic。涉及数据库结构的完整更新必须先更新 app；app 完成迁移并通过健康检查后，再按需独立更新 collector 和 worker：
+当前版本采用全新数据库 Schema，不支持从旧版数据库原地升级。部署当前版本前需要由运维人员显式删除旧数据库卷并创建空数据库；应用本身不会自动删除数据：
+
+```shell
+docker compose down
+docker volume ls
+# 确认实际数据库卷名称后，再显式删除该卷
+docker volume rm <database-volume-name>
+docker compose up --build -d
+```
+
+数据库迁移由 app 在启动管理服务前执行，collector 和 worker 不执行 Alembic。全新数据库只执行单一的 `0001_initial`。完成首次部署后，app、collector 和 worker仍可使用独立镜像标签分别更新：
 
 ```shell
 docker compose build app
@@ -111,8 +121,6 @@ docker compose build app
 docker compose up -d --no-deps app
 ```
 
-为保证独立更新安全，迁移必须兼容仍在运行的旧版 collector 和 worker：先增加新结构并完成服务升级，破坏性删除或重命名留到后续版本。
-
 需要只执行数据库迁移而不常驻启动管理服务时，复用 app 镜像：
 
 ```shell
@@ -121,13 +129,11 @@ docker compose run --rm --no-deps app alembic upgrade head
 
 仅新增数据库迁移文件时，collector 和 worker 均无需重新构建；迁移文件只随 app 镜像发布。
 
-迁移保留现有容器、原始样本、聚合结果和旧资源 Token。历史数据计入“历史未归属”，但不提供单独入口和归属修改功能。
-
 ## 存储与历史展示
 
 `sample_batches` 和 `gpu_samples` 按 `collected_at` 使用 PostgreSQL 原生日分区。`pg_partman` 删除超过 30 天的原始秒级分区；项目、用户、申请、容器和小时聚合不删除。
 
-worker 按 `BUSINESS_TIMEZONE` 每天聚合昨天的数据，首次启动会从现存最早原始样本补齐到昨天，聚合结果按小时永久保存，不考虑迟到补传。运行中容器的近 1 天/近 7 天趋势仍读取原始数据；已移除容器的完整生命周期趋势读取小时聚合数据，不提供明细、日期筛选或导出。
+worker 按 `BUSINESS_TIMEZONE` 每天 08:00 聚合昨天的数据，聚合结果按小时永久保存，不考虑迟到补传。运行中容器趋势读取原始数据；已移除容器的完整生命周期趋势读取小时聚合数据，不提供明细、日期筛选或导出。
 
 用户历史和项目历史面板只展示历史算力申请、历史容器记录和容器下的使用趋势，不统计卡天。
 

@@ -110,7 +110,7 @@ def main() -> int:
         201,
     )
     assert isinstance(resource, dict)
-    assert resource["token"] is None
+    assert "token" not in resource
     resource_id = str(resource["id"])
     compute_request = client.request(
         "POST",

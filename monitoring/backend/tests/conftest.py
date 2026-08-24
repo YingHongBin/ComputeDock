@@ -5,3 +5,5 @@ import os
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://unused:unused@127.0.0.1/unused")
 os.environ.setdefault("ADMIN_USERNAME", "admin")
 os.environ.setdefault("ADMIN_PASSWORD", "long-enough-test-password")
+os.environ.setdefault("ADMIN_FULL_NAME", "Test Administrator")
+os.environ.setdefault("ADMIN_EMAIL", "admin@example.test")

@@ -7,6 +7,18 @@ import { api, errorMessage } from '../api'
 import { useNavigation } from '../routing'
 import type { ComputeRequestData, HistoryContainerData, ProjectData, UserData } from '../types'
 
+function formatDuration(seconds: number | null): string {
+  if (seconds === null) return '--'
+  const days = Math.floor(seconds / 86400)
+  const hours = Math.floor((seconds % 86400) / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  return `${days} 天 ${hours} 小时 ${minutes} 分钟`
+}
+
+function formatPercent(value: number | null): string {
+  return value === null ? '--' : `${value.toFixed(2)}%`
+}
+
 export function HistoryPage({ mode }: { mode: 'users' | 'projects' }) {
   const { message } = App.useApp()
   const { navigate } = useNavigation()
@@ -55,12 +67,26 @@ export function HistoryPage({ mode }: { mode: 'users' | 'projects' }) {
   ]
 
   const containerColumns: ColumnsType<HistoryContainerData> = [
-    { title: '容器', dataIndex: 'name', render: (value, row) => <Space>{value}{row.generation > 1 && <Tag>第 {row.generation} 代</Tag>}</Space> },
-    { title: '申请人', dataIndex: 'applicant_name' },
     { title: '项目', dataIndex: 'project_name' },
+    { title: '申请人', dataIndex: 'applicant_name' },
+    { title: '内部容器', dataIndex: 'name', render: (value, row) => <Space>{value}{row.generation > 1 && <Tag>第 {row.generation} 代</Tag>}</Space> },
     { title: '资源', dataIndex: 'resource_name' },
     { title: '首次上报', dataIndex: 'first_reported_at', render: (value) => dayjs(value).format('YYYY-MM-DD HH:mm') },
     { title: '移除时间', dataIndex: 'removed_at', render: (value) => value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '--' },
+    {
+      title: '使用时长',
+      dataIndex: 'usage_duration_seconds',
+      render: (value, row) => row.usage_summary_status === 'pending' ? <Tag color="processing">统计中</Tag> : formatDuration(value),
+    },
+    { title: '实际 GPU', dataIndex: 'usage_gpu_count', render: (value, row) => row.usage_summary_status === 'pending' ? '--' : value ?? '--' },
+    {
+      title: 'GPU 使用率（平均 / 峰值）',
+      render: (_, row) => row.usage_summary_status === 'pending' ? '--' : `${formatPercent(row.usage_gpu_utilization_avg)} / ${formatPercent(row.usage_gpu_utilization_max)}`,
+    },
+    {
+      title: '显存使用率（平均 / 峰值）',
+      render: (_, row) => row.usage_summary_status === 'pending' ? '--' : `${formatPercent(row.usage_memory_utilization_avg)} / ${formatPercent(row.usage_memory_utilization_max)}`,
+    },
   ]
 
   return (
@@ -96,7 +122,7 @@ export function HistoryPage({ mode }: { mode: 'users' | 'projects' }) {
                   loading={loading}
                   columns={containerColumns}
                   dataSource={containers}
-                  scroll={{ x: 1000 }}
+                  scroll={{ x: 1600 }}
                   onRow={(row) => ({
                     onClick: () => navigate(`/history/containers/${row.id}`),
                   })}

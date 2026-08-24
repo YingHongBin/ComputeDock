@@ -53,7 +53,6 @@ def session_view(user: User, csrf_token: str) -> AdminView:
         full_name=user.full_name,
         email=user.email,
         email_verified=user.email_verified_at is not None,
-        must_bind_email=user.must_bind_email,
         role=user.role,  # type: ignore[arg-type]
         csrf_token=csrf_token,
     )
@@ -281,9 +280,7 @@ def login(
     settings: Settings = Depends(get_settings),
 ) -> AdminView:
     db.execute(delete(AdminSession).where(AdminSession.expires_at <= utcnow()))
-    user = db.scalar(
-        select(User).where(func.lower(User.username) == payload.username.lower())
-    )
+    user = db.scalar(select(User).where(func.lower(User.username) == payload.username.lower()))
     if user is None or not verify_password(user.password_hash, payload.password):
         db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "invalid username or password")
@@ -343,7 +340,7 @@ def change_password(
     auth.user.updated_at = utcnow()
     db.execute(
         delete(AdminSession).where(
-            or_(AdminSession.user_id == auth.user.id, AdminSession.admin_id == auth.user.id),
+            AdminSession.user_id == auth.user.id,
             AdminSession.id != auth.session.id,
         )
     )
@@ -411,11 +408,7 @@ def reset_password(
     user.password_hash = hash_password(payload.new_password)
     user.updated_at = now
     token.consumed_at = now
-    db.execute(
-        delete(AdminSession).where(
-            or_(AdminSession.user_id == user.id, AdminSession.admin_id == user.id)
-        )
-    )
+    db.execute(delete(AdminSession).where(AdminSession.user_id == user.id))
     if user.email:
         enqueue_notification(
             db,
@@ -505,7 +498,6 @@ def confirm_email_change(
     old_email = user.email
     user.email = token.pending_email
     user.email_verified_at = now
-    user.must_bind_email = False
     user.updated_at = now
     token.consumed_at = now
     for address, suffix in ((old_email, "old"), (user.email, "new")):

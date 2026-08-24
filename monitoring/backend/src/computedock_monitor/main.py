@@ -11,8 +11,7 @@ from sqlalchemy import func, select
 
 from .config import get_settings
 from .database import SessionLocal
-from .models import Admin, EmailActionToken, User
-from .notifications import action_url, enqueue_notification, issue_action_token
+from .models import User
 from .proxy_prefix import (
     FORWARDED_PREFIX_HEADER,
     inject_base_href,
@@ -28,67 +27,22 @@ def ensure_initial_admin() -> None:
     settings = get_settings()
     with SessionLocal() as db:
         now = utcnow()
-        admin = db.scalar(
-            select(Admin).where(func.lower(Admin.username) == settings.admin_username.lower())
-        )
         user = db.scalar(
             select(User).where(func.lower(User.username) == settings.admin_username.lower())
         )
         if user is None:
-            if admin is None:
-                admin = Admin(
-                    username=settings.admin_username,
-                    password_hash=hash_password(settings.admin_password),
-                    created_at=now,
-                    updated_at=now,
-                )
-                db.add(admin)
-                db.flush()
             user = User(
-                id=admin.id,
                 username=settings.admin_username,
-                full_name=settings.admin_username,
-                password_hash=admin.password_hash,
+                full_name=settings.admin_full_name,
+                email=settings.admin_email.strip().lower(),
+                email_verified_at=now,
+                password_hash=hash_password(settings.admin_password),
                 role="admin",
                 status="active",
-                must_bind_email=True,
-                created_at=admin.created_at,
-                updated_at=admin.updated_at,
+                created_at=now,
+                updated_at=now,
             )
             db.add(user)
-            db.flush()
-        if settings.admin_email and user.email is None:
-            user.email = settings.admin_email.strip().lower()
-            user.must_bind_email = True
-            user.updated_at = now
-        if user.email and user.email_verified_at is None:
-            pending_token = db.scalar(
-                select(EmailActionToken.id).where(
-                    EmailActionToken.user_id == user.id,
-                    EmailActionToken.purpose == "email_change",
-                    EmailActionToken.pending_email == user.email,
-                    EmailActionToken.consumed_at.is_(None),
-                    EmailActionToken.expires_at > now,
-                )
-            )
-            if pending_token is None:
-                token, secret = issue_action_token(
-                    db,
-                    purpose="email_change",
-                    user_id=user.id,
-                    pending_email=user.email,
-                )
-                enqueue_notification(
-                    db,
-                    idempotency_key=f"legacy-admin-email:{token.id}",
-                    template="email_change_verify",
-                    to_address=user.email,
-                    payload={
-                        "full_name": user.full_name,
-                        "action_url": action_url(db, settings, "/verify-new-email", secret),
-                        "expires_hours": 24,
-                    },
-                )
         db.commit()
 
 

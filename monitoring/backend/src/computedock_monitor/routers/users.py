@@ -38,7 +38,6 @@ def user_view(user: User) -> UserView:
         email_verified_at=user.email_verified_at,
         role=user.role,  # type: ignore[arg-type]
         status=user.status,  # type: ignore[arg-type]
-        must_bind_email=user.must_bind_email,
         created_at=user.created_at,
     )
 
@@ -121,7 +120,6 @@ def review_registration(
             password_hash=registration.password_hash,
             role="user",
             status="active",
-            must_bind_email=False,
             created_at=now,
             updated_at=now,
         )
@@ -218,11 +216,7 @@ def update_user(
     if before["status"] != "disabled" and user.status == "disabled":
         auto_reject_user_requests(db, user.id, auth.user.id)
     if before != {"role": user.role, "status": user.status}:
-        db.execute(
-            delete(AdminSession).where(
-                or_(AdminSession.user_id == user.id, AdminSession.admin_id == user.id)
-            )
-        )
+        db.execute(delete(AdminSession).where(AdminSession.user_id == user.id))
     record_audit(
         db,
         auth.user,

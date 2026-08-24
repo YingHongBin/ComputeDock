@@ -26,9 +26,8 @@ class ChangePasswordRequest(BaseModel):
 class AdminView(BaseModel):
     username: str
     full_name: str
-    email: str | None
+    email: str
     email_verified: bool
-    must_bind_email: bool
     role: Literal["admin", "user"]
     csrf_token: str
 
@@ -114,11 +113,10 @@ class UserView(BaseModel):
     id: uuid.UUID
     username: str
     full_name: str
-    email: str | None
+    email: str
     email_verified_at: datetime | None
     role: Literal["admin", "user"]
     status: Literal["active", "disabled"]
-    must_bind_email: bool
     created_at: datetime
 
 
@@ -166,6 +164,8 @@ class SmtpSettingsView(BaseModel):
 
 class GeneralSettingsInput(BaseModel):
     api_base_url: str = Field(min_length=1, max_length=2048)
+    low_utilization_warning_enabled: bool = True
+    low_utilization_threshold: int = Field(default=10, ge=1, le=100)
 
     @field_validator("api_base_url")
     @classmethod
@@ -186,6 +186,8 @@ class GeneralSettingsInput(BaseModel):
 
 class GeneralSettingsView(BaseModel):
     api_base_url: str
+    low_utilization_warning_enabled: bool
+    low_utilization_threshold: int
     source: Literal["database", "environment"]
 
 
@@ -302,6 +304,13 @@ class HistoryContainerView(BaseModel):
     last_received_at: datetime
     removed_at: datetime | None
     expires_at: datetime | None
+    usage_summary_status: Literal["pending", "completed"] | None
+    usage_duration_seconds: int | None
+    usage_gpu_count: int | None
+    usage_gpu_utilization_avg: float | None
+    usage_gpu_utilization_max: int | None
+    usage_memory_utilization_avg: float | None
+    usage_memory_utilization_max: float | None
 
 
 class HourlyHistoryPoint(BaseModel):
@@ -323,6 +332,8 @@ class HourlyHistorySeries(BaseModel):
 class HistoryContainerChart(BaseModel):
     container_id: uuid.UUID
     container_name: str
+    project_name: str
+    applicant_name: str
     first_reported_at: datetime
     removed_at: datetime
     series: list[HourlyHistorySeries]
@@ -351,7 +362,6 @@ class ResourceCard(BaseModel):
     available_gpu_count: int
     overallocated: bool
     status: Literal["active", "disabled"] = "active"
-    token: str | None = None
 
 
 class ResourceDetail(ResourceCard):
@@ -406,6 +416,8 @@ class SampleAccepted(BaseModel):
 class ContainerSummary(BaseModel):
     id: uuid.UUID
     name: str
+    project_name: str
+    applicant_name: str
     generation: int
     status: Literal["online", "offline"]
     last_received_at: datetime
@@ -436,6 +448,8 @@ class ChartResponse(BaseModel):
 
     container_id: uuid.UUID
     container_name: str
+    project_name: str
+    applicant_name: str
     range: Literal["1h", "6h", "1d", "7d"]
     bucket_seconds: int
     window_start: datetime

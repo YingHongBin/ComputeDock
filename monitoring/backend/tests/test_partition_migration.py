@@ -9,5 +9,5 @@ def test_all_raw_tables_have_daily_partition_ttl() -> None:
     assert "public.gpu_samples" in content
     assert "retention = '30 days'" in content
     assert "retention_keep_table = false" in content
-    assert "token varchar(100) NOT NULL" in content
+    assert "compute_request_id uuid NOT NULL" in content
     assert "token_ciphertext" not in content

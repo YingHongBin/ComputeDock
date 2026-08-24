@@ -1,38 +1,16 @@
 import { LogoutOutlined } from '@ant-design/icons'
-import { Alert, App, Button, Form, Input, Layout, Modal, Space, Typography } from 'antd'
-import { useState } from 'react'
+import { Button, Layout, Space, Typography } from 'antd'
 import type { PropsWithChildren } from 'react'
-import { api, csrfHeaders, errorMessage } from '../api'
 import { useAuth } from '../auth'
 import { useNavigation } from '../routing'
 
 export function AppShell({ children }: PropsWithChildren) {
   const { session, logout } = useAuth()
-  const { message } = App.useApp()
   const { navigate, path } = useNavigation()
-  const [emailOpen, setEmailOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [emailForm] = Form.useForm()
 
   const handleLogout = async () => {
     await logout()
     navigate('/login', { replace: true })
-  }
-
-  const changeEmail = async (values: { current_password: string; new_email: string }) => {
-    setBusy(true)
-    try {
-      await api.post('/auth/email/change-request', values, {
-        headers: csrfHeaders(session?.csrf_token ?? ''),
-      })
-      message.success('验证邮件已发送到新邮箱')
-      emailForm.resetFields()
-      setEmailOpen(false)
-    } catch (error) {
-      message.error(errorMessage(error))
-    } finally {
-      setBusy(false)
-    }
   }
 
   const navigation = [
@@ -71,34 +49,8 @@ export function AppShell({ children }: PropsWithChildren) {
         </Space>
       </Layout.Header>
       <Layout.Content className="app-content">
-        {session?.must_bind_email && (
-          <Alert
-            type="warning"
-            showIcon
-            message="请绑定并验证邮箱，以接收审核、密码重置和到期通知。"
-            action={<Button size="small" onClick={() => setEmailOpen(true)}>绑定邮箱</Button>}
-            className="profile-alert"
-          />
-        )}
         {children}
       </Layout.Content>
-      <Modal
-        title="更换绑定邮箱"
-        open={emailOpen}
-        onCancel={() => setEmailOpen(false)}
-        onOk={() => emailForm.submit()}
-        confirmLoading={busy}
-        destroyOnHidden
-      >
-        <Form form={emailForm} layout="vertical" onFinish={changeEmail} preserve={false}>
-          <Form.Item name="current_password" label="当前密码" rules={[{ required: true }]}>
-            <Input.Password />
-          </Form.Item>
-          <Form.Item name="new_email" label="新邮箱" rules={[{ required: true }, { type: 'email' }]}>
-            <Input autoComplete="email" />
-          </Form.Item>
-        </Form>
-      </Modal>
     </Layout>
   )
 }

@@ -31,28 +31,17 @@ class Base(DeclarativeBase):
 JsonType = JSON().with_variant(JSONB(), "postgresql")
 
 
-class Admin(Base):
-    __tablename__ = "admins"
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
-    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
 class User(Base):
     __tablename__ = "users"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     username: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     full_name: Mapped[str] = mapped_column(String(200), nullable=False)
-    email: Mapped[str | None] = mapped_column(String(320), unique=True)
+    email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
-    must_bind_email: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -61,19 +50,15 @@ class AdminSession(Base):
     __tablename__ = "admin_sessions"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    admin_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("admins.id", ondelete="CASCADE")
-    )
-    user_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("users.id", ondelete="CASCADE")
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     token_hash: Mapped[bytes] = mapped_column(LargeBinary(32), unique=True, nullable=False)
     csrf_hash: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-    admin: Mapped[Admin | None] = relationship()
-    user: Mapped[User | None] = relationship()
+    user: Mapped[User] = relationship()
 
 
 class RegistrationRequest(Base):
@@ -156,29 +141,17 @@ class ComputeResource(Base):
     __tablename__ = "compute_resources"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     gpu_model: Mapped[str] = mapped_column(String(200), nullable=False)
     gpu_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    token_hash: Mapped[bytes | None] = mapped_column(LargeBinary(32), unique=True)
-    token: Mapped[str | None] = mapped_column(String(100))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     disabled_by_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("users.id", ondelete="RESTRICT")
     )
 
     containers: Mapped[list[ContainerInstance]] = relationship(back_populates="resource")
-
-    __table_args__ = (
-        Index(
-            "uq_compute_resources_active_name",
-            "name",
-            unique=True,
-            postgresql_where=text("archived_at IS NULL"),
-        ),
-    )
 
 
 class ComputeRequest(Base):
@@ -251,8 +224,8 @@ class ContainerInstance(Base):
     resource_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("compute_resources.id", ondelete="RESTRICT"), nullable=False
     )
-    compute_request_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("compute_requests.id", ondelete="RESTRICT")
+    compute_request_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("compute_requests.id", ondelete="RESTRICT"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -261,47 +234,37 @@ class ContainerInstance(Base):
     latest_collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     current_gpu_ids: Mapped[list[str]] = mapped_column(JsonType, nullable=False, default=list)
     removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    usage_summary_status: Mapped[str | None] = mapped_column(String(20))
+    usage_duration_seconds: Mapped[int | None] = mapped_column(BigInteger)
+    usage_gpu_count: Mapped[int | None] = mapped_column(Integer)
+    usage_gpu_utilization_avg: Mapped[float | None] = mapped_column(Float)
+    usage_gpu_utilization_max: Mapped[int | None] = mapped_column(Integer)
+    usage_memory_utilization_avg: Mapped[float | None] = mapped_column(Float)
+    usage_memory_utilization_max: Mapped[float | None] = mapped_column(Float)
+    usage_summary_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     resource: Mapped[ComputeResource] = relationship(back_populates="containers")
     batches: Mapped[list[SampleBatch]] = relationship(back_populates="container")
 
     __table_args__ = (
         Index(
-            "uq_container_legacy_generation",
-            "resource_id",
-            "name",
-            "generation",
-            unique=True,
-            postgresql_where=text("compute_request_id IS NULL"),
-            sqlite_where=text("compute_request_id IS NULL"),
-        ),
-        Index(
             "uq_container_request_generation",
             "compute_request_id",
             "name",
             "generation",
             unique=True,
-            postgresql_where=text("compute_request_id IS NOT NULL"),
-            sqlite_where=text("compute_request_id IS NOT NULL"),
-        ),
-        Index(
-            "uq_container_legacy_active_name",
-            "resource_id",
-            "name",
-            unique=True,
-            postgresql_where=text("removed_at IS NULL AND compute_request_id IS NULL"),
-            sqlite_where=text("removed_at IS NULL AND compute_request_id IS NULL"),
         ),
         Index(
             "uq_container_request_active_name",
             "compute_request_id",
             "name",
             unique=True,
-            postgresql_where=text("removed_at IS NULL AND compute_request_id IS NOT NULL"),
-            sqlite_where=text("removed_at IS NULL AND compute_request_id IS NOT NULL"),
+            postgresql_where=text("removed_at IS NULL"),
+            sqlite_where=text("removed_at IS NULL"),
         ),
         Index("ix_container_resource_active", "resource_id", "removed_at"),
         Index("ix_container_request_active", "compute_request_id", "removed_at"),
+        Index("ix_container_usage_summary", "usage_summary_status", "removed_at"),
     )
 
 
@@ -358,8 +321,8 @@ class HourlyGpuRollup(Base):
     resource_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("compute_resources.id", ondelete="RESTRICT"), nullable=False
     )
-    compute_request_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid, ForeignKey("compute_requests.id", ondelete="RESTRICT")
+    compute_request_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("compute_requests.id", ondelete="RESTRICT"), nullable=False
     )
     container_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("container_instances.id", ondelete="RESTRICT"), nullable=False
@@ -429,6 +392,10 @@ class SystemSetting(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     api_base_url: Mapped[str] = mapped_column(String(2048), nullable=False, default="")
+    low_utilization_warning_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    low_utilization_threshold: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
     updated_by_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )

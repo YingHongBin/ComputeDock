@@ -32,7 +32,7 @@ def resource_record(db: Session, resource_id: uuid.UUID) -> ComputeResource:
     return resource
 
 
-def card_for(db: Session, resource: ComputeResource, *, include_token: bool) -> ResourceCard:
+def card_for(db: Session, resource: ComputeResource) -> ResourceCard:
     containers = list(
         db.scalars(
             select(ContainerInstance).where(
@@ -41,18 +41,16 @@ def card_for(db: Session, resource: ComputeResource, *, include_token: bool) -> 
             )
         )
     )
-    return resource_card(resource, containers, include_token=include_token)
+    return resource_card(resource, containers)
 
 
 @router.get("", response_model=list[ResourceCard])
 def list_resources(
-    auth: AuthContext = Depends(require_user),
+    _auth: AuthContext = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> list[ResourceCard]:
     resources = list(
-        db.scalars(
-            select(ComputeResource).order_by(ComputeResource.created_at.desc())
-        )
+        db.scalars(select(ComputeResource).order_by(ComputeResource.created_at.desc()))
     )
     containers = list(
         db.scalars(select(ContainerInstance).where(ContainerInstance.removed_at.is_(None)))
@@ -60,14 +58,7 @@ def list_resources(
     by_resource: dict[uuid.UUID, list[ContainerInstance]] = {}
     for container in containers:
         by_resource.setdefault(container.resource_id, []).append(container)
-    return [
-        resource_card(
-            item,
-            by_resource.get(item.id, []),
-            include_token=auth.user.role == "admin",
-        )
-        for item in resources
-    ]
+    return [resource_card(item, by_resource.get(item.id, [])) for item in resources]
 
 
 @router.post("", response_model=ResourceDetail, status_code=status.HTTP_201_CREATED)
@@ -82,8 +73,6 @@ def create_resource(
         name=payload.name,
         gpu_model=payload.gpu_model,
         gpu_count=payload.gpu_count,
-        token_hash=None,
-        token=None,
         created_at=now,
         updated_at=now,
     )
@@ -112,11 +101,11 @@ def create_resource(
 @router.get("/{resource_id}", response_model=ResourceDetail)
 def get_resource(
     resource_id: uuid.UUID,
-    auth: AuthContext = Depends(require_user),
+    _auth: AuthContext = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> ResourceDetail:
     resource = resource_record(db, resource_id)
-    card = card_for(db, resource, include_token=auth.user.role == "admin")
+    card = card_for(db, resource)
     return ResourceDetail(**card.model_dump(), created_at=resource.created_at)
 
 
@@ -155,7 +144,7 @@ def update_resource(
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "resource name already exists") from exc
-    card = card_for(db, resource, include_token=True)
+    card = card_for(db, resource)
     return ResourceDetail(**card.model_dump(), created_at=resource.created_at)
 
 
@@ -224,7 +213,7 @@ def set_resource_status(
         after={"status": target},
     )
     db.commit()
-    card = card_for(db, resource, include_token=True)
+    card = card_for(db, resource)
     return ResourceDetail(**card.model_dump(), created_at=resource.created_at)
 
 
@@ -244,16 +233,6 @@ def enable_resource(
     db: Session = Depends(get_db),
 ) -> ResourceDetail:
     return set_resource_status(resource_id, False, auth, db)
-
-
-@router.delete("/{resource_id}", status_code=status.HTTP_204_NO_CONTENT, deprecated=True)
-def legacy_disable_resource(
-    resource_id: uuid.UUID,
-    auth: AuthContext = Depends(require_admin_csrf),
-    db: Session = Depends(get_db),
-) -> Response:
-    set_resource_status(resource_id, True, auth, db)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{resource_id}/containers", response_model=list[ContainerSummary])
@@ -285,6 +264,7 @@ def remove_container(
     if container is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "container not found")
     container.removed_at = utcnow()
+    container.usage_summary_status = "pending"
     record_audit(
         db,
         _auth.user,

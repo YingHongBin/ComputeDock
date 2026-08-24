@@ -68,8 +68,8 @@ export function ResourceDetailPage({ resourceId }: { resourceId: string }) {
   const removeContainer = (container: ContainerSummary) => {
     if (!session) return
     modal.confirm({
-      title: `移除容器“${container.name}”？`,
-      content: '再次收到同名 Agent 上报时，系统会创建新的容器实例。',
+      title: `移除“${container.project_name} · ${container.applicant_name}”的容器？`,
+      content: `内部容器：${container.name}。再次收到同名 Agent 上报时，系统会创建新的容器实例。`,
       okText: '确认移除',
       okButtonProps: { danger: true },
       cancelText: '取消',
@@ -114,14 +114,13 @@ export function ResourceDetailPage({ resourceId }: { resourceId: string }) {
 
   const columns = useMemo<ColumnsType<ContainerSummary>>(() => [
     {
-      title: '容器名称',
-      dataIndex: 'name',
+      title: '项目 / 申请人',
       fixed: 'left',
-      width: 140,
-      render: (name, row) => (
+      width: 220,
+      render: (_, row) => (
         <div className="container-name-cell">
-          <Typography.Text strong>{name}</Typography.Text>
-          {row.generation > 1 && <Tag>第 {row.generation} 代</Tag>}
+          <Typography.Text strong>{row.project_name} · {row.applicant_name}</Typography.Text>
+          <Typography.Text type="secondary">{row.name}{row.generation > 1 ? ` · 第 ${row.generation} 代` : ''}</Typography.Text>
         </div>
       ),
     },
@@ -171,7 +170,9 @@ export function ResourceDetailPage({ resourceId }: { resourceId: string }) {
       <Flex justify="space-between" align="center" className="chart-heading">
         <div>
           <Typography.Title level={3}>GPU 使用趋势</Typography.Title>
-          <Typography.Text type="secondary">{chart?.container_name ?? '请先选择容器'}</Typography.Text>
+          <Typography.Text type="secondary">
+            {chart ? `${chart.project_name} · ${chart.applicant_name} · ${chart.container_name}` : '请先选择容器'}
+          </Typography.Text>
         </div>
         <Segmented value={range} options={rangeOptions} onChange={(value) => setRange(value as ChartRange)} />
       </Flex>

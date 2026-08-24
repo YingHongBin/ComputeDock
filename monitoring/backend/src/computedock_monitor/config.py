@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,7 +16,8 @@ class DatabaseSettings(BaseSettings):
 class Settings(DatabaseSettings):
     admin_username: str
     admin_password: str
-    admin_email: str | None = None
+    admin_full_name: str = Field(min_length=1, max_length=200)
+    admin_email: str = Field(min_length=3, max_length=320)
     public_base_url: str = "http://127.0.0.1:8000"
     business_timezone: str = "Asia/Shanghai"
     cookie_secure: bool = True
@@ -33,6 +35,23 @@ class Settings(DatabaseSettings):
     smtp_ssl: bool = False
     worker_poll_seconds: int = 60
     mail_max_attempts: int = 5
+
+    @field_validator("admin_full_name")
+    @classmethod
+    def strip_admin_full_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("must not be blank")
+        return value
+
+    @field_validator("admin_email")
+    @classmethod
+    def normalize_admin_email(cls, value: str) -> str:
+        value = value.strip().lower()
+        local, separator, domain = value.partition("@")
+        if separator != "@" or not local or "." not in domain or domain.startswith("."):
+            raise ValueError("invalid email address")
+        return value
 
     @property
     def allowed_origin_list(self) -> list[str]:

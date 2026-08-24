@@ -47,7 +47,11 @@ export function SettingsPage() {
         from_name: data.from_name,
         use_tls: data.use_tls,
       })
-      generalForm.setFieldsValue({ api_base_url: generalData.api_base_url })
+      generalForm.setFieldsValue({
+        api_base_url: generalData.api_base_url,
+        low_utilization_warning_enabled: generalData.low_utilization_warning_enabled,
+        low_utilization_threshold: generalData.low_utilization_threshold,
+      })
     } catch (error) {
       message.error(errorMessage(error))
     } finally {
@@ -65,8 +69,12 @@ export function SettingsPage() {
         headers: csrfHeaders(session.csrf_token),
       })
       setGeneralSettings(data)
-      generalForm.setFieldsValue({ api_base_url: data.api_base_url })
-      message.success('API Base URL 已保存')
+      generalForm.setFieldsValue({
+        api_base_url: data.api_base_url,
+        low_utilization_warning_enabled: data.low_utilization_warning_enabled,
+        low_utilization_threshold: data.low_utilization_threshold,
+      })
+      message.success('系统设置已保存')
     } catch (error) {
       message.error(errorMessage(error))
     } finally {
@@ -113,7 +121,7 @@ export function SettingsPage() {
     <section>
       <div className="page-heading">
         <Typography.Title level={2}>设置</Typography.Title>
-        <Typography.Text type="secondary">管理系统访问地址和邮件发送配置。</Typography.Text>
+        <Typography.Text type="secondary">管理系统访问地址、算力使用预警和邮件发送配置。</Typography.Text>
       </div>
       <Card
         title={<Space>系统设置 {generalSettings && <Tag>{generalSettings.source === 'database' ? '数据库配置' : '环境变量配置'}</Tag>}</Space>}
@@ -142,6 +150,22 @@ export function SettingsPage() {
             extra="例如：https://monitor.example.com 或 https://example.com/monitor"
           >
             <Input maxLength={2048} placeholder="https://monitor.example.com" />
+          </Form.Item>
+          <Form.Item
+            name="low_utilization_warning_enabled"
+            label="启用低使用率预警"
+            valuePropName="checked"
+            extra="每天 08:00 统计昨天的数据；仅对上报跨度不少于 12 小时且仍在运行的容器发送邮件预警。"
+          >
+            <Switch />
+          </Form.Item>
+          <Form.Item
+            name="low_utilization_threshold"
+            label="低使用率阈值"
+            rules={[{ required: true, message: '请输入 1%–100% 的整数' }]}
+            extra="容器日均 GPU 使用率严格低于该阈值时触发预警。"
+          >
+            <InputNumber min={1} max={100} precision={0} addonAfter="%" style={{ width: '100%' }} />
           </Form.Item>
           <Button type="primary" htmlType="submit" loading={savingGeneral}>保存</Button>
         </Form>

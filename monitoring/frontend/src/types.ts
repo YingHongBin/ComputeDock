@@ -1,9 +1,8 @@
 export interface AdminSession {
   username: string
   full_name: string
-  email: string | null
+  email: string
   email_verified: boolean
-  must_bind_email: boolean
   role: 'admin' | 'user'
   csrf_token: string
 }
@@ -17,7 +16,6 @@ export interface ResourceCardData {
   available_gpu_count: number
   overallocated: boolean
   status: 'active' | 'disabled'
-  token: string | null
   created_at?: string
 }
 
@@ -30,6 +28,8 @@ export interface ResourceInput {
 export interface ContainerSummary {
   id: string
   name: string
+  project_name: string
+  applicant_name: string
   generation: number
   status: 'online' | 'offline'
   last_received_at: string
@@ -58,6 +58,8 @@ export interface GpuChartSeries {
 export interface ChartResponse {
   container_id: string
   container_name: string
+  project_name: string
+  applicant_name: string
   range: ChartRange
   bucket_seconds: number
   window_start: string
@@ -73,11 +75,10 @@ export interface UserData {
   id: string
   username: string
   full_name: string
-  email: string | null
+  email: string
   email_verified_at: string | null
   role: 'admin' | 'user'
   status: 'active' | 'disabled'
-  must_bind_email: boolean
   created_at: string
 }
 
@@ -116,11 +117,15 @@ export interface SmtpSettingsInput {
 
 export interface GeneralSettingsData {
   api_base_url: string
+  low_utilization_warning_enabled: boolean
+  low_utilization_threshold: number
   source: 'database' | 'environment'
 }
 
 export interface GeneralSettingsInput {
   api_base_url: string
+  low_utilization_warning_enabled: boolean
+  low_utilization_threshold: number
 }
 
 export interface ProjectMemberData {
@@ -192,6 +197,13 @@ export interface HistoryContainerData {
   last_received_at: string
   removed_at: string | null
   expires_at: string | null
+  usage_summary_status: 'pending' | 'completed' | null
+  usage_duration_seconds: number | null
+  usage_gpu_count: number | null
+  usage_gpu_utilization_avg: number | null
+  usage_gpu_utilization_max: number | null
+  usage_memory_utilization_avg: number | null
+  usage_memory_utilization_max: number | null
 }
 
 export interface HourlyHistoryPoint {
@@ -208,6 +220,8 @@ export interface HourlyHistoryPoint {
 export interface HistoryContainerChartData {
   container_id: string
   container_name: string
+  project_name: string
+  applicant_name: string
   first_reported_at: string
   removed_at: string
   series: Array<{ gpuid: string; points: HourlyHistoryPoint[] }>

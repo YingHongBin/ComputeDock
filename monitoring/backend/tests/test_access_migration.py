@@ -5,99 +5,62 @@ from sqlalchemy import CheckConstraint
 
 from computedock_monitor.models import Base
 
-MIGRATION = Path(__file__).parents[1] / "alembic" / "versions" / "0002_access_requests.py"
+MIGRATION = Path(__file__).parents[1] / "alembic" / "versions" / "0001_initial.py"
 
 
-def test_access_migration_preserves_legacy_tokens_and_samples() -> None:
-    content = MIGRATION.read_text(encoding="utf-8")
-    assert "ALTER COLUMN token_hash DROP NOT NULL" in content
-    assert "ALTER COLUMN token DROP NOT NULL" in content
-    assert "UPDATE compute_resources SET disabled_at = archived_at" in content
-    assert "DROP TABLE sample_batches" not in content
-    assert "DROP TABLE gpu_samples" not in content
-
-
-def test_access_migration_adds_permanent_business_records() -> None:
+def test_clean_schema_contains_all_business_tables() -> None:
     content = MIGRATION.read_text(encoding="utf-8")
     for table in (
         "users",
+        "admin_sessions",
         "registration_requests",
+        "email_action_tokens",
         "projects",
         "project_members",
+        "compute_resources",
         "compute_requests",
         "compute_request_changes",
+        "container_instances",
+        "sample_batches",
+        "gpu_samples",
         "hourly_gpu_rollups",
         "notification_outbox",
+        "smtp_settings",
+        "system_settings",
         "audit_events",
         "worker_checkpoints",
     ):
         assert f"CREATE TABLE {table}" in content
 
 
-def test_project_number_is_internal_and_generated_by_database() -> None:
+def test_clean_schema_has_no_legacy_compatibility_structures() -> None:
     content = MIGRATION.read_text(encoding="utf-8")
-    assert "code varchar(100) NOT NULL UNIQUE DEFAULT gen_random_uuid()::text" in content
+    assert "CREATE TABLE admins" not in content
+    assert "admin_id" not in content
+    assert "archived_at" not in content
+    assert "uq_container_legacy" not in content
+    assert "UPDATE container_instances" not in content
+    resource_section = content.split("CREATE TABLE compute_resources", 1)[1].split(
+        "CREATE TABLE compute_requests", 1
+    )[0]
+    assert "token_hash" not in resource_section
+    assert " token " not in resource_section
 
 
-def test_access_migration_keeps_existing_sessions_compatible() -> None:
-    content = MIGRATION.read_text(encoding="utf-8")
-    assert "ADD COLUMN user_id" in content
-    assert "UPDATE admin_sessions SET user_id = admin_id" in content
-    assert "ALTER TABLE admin_sessions ALTER COLUMN admin_id DROP NOT NULL" in content
+def test_clean_schema_requires_request_owned_containers_and_rollups() -> None:
+    schema_sql = run_path(str(MIGRATION))["SCHEMA_SQL"]
+    assert "compute_request_id uuid NOT NULL REFERENCES compute_requests" in schema_sql
+    assert "WHERE removed_at IS NULL" in schema_sql
 
 
-def test_combined_migration_preserves_legacy_and_request_container_names() -> None:
-    content = MIGRATION.read_text(encoding="utf-8")
-    assert "uq_container_legacy_active_name" in content
-    assert "uq_container_request_active_name" in content
-    assert "WHERE compute_request_id IS NULL" in content
-    assert "WHERE removed_at IS NULL AND compute_request_id IS NOT NULL" in content
+def test_clean_schema_is_the_only_migration() -> None:
+    versions = sorted(MIGRATION.parent.glob("*.py"))
+    assert [path.name for path in versions] == ["0001_initial.py"]
 
 
-def test_combined_migration_creates_no_new_check_constraints() -> None:
+def test_clean_schema_has_no_check_constraints() -> None:
     schema_sql = run_path(str(MIGRATION))["SCHEMA_SQL"]
     assert "CHECK (" not in schema_sql
-
-
-def test_combined_migration_removes_initial_check_constraints() -> None:
-    content = MIGRATION.read_text(encoding="utf-8")
-    for constraint_name in (
-        "compute_resources_gpu_count_check",
-        "gpu_samples_check",
-        "gpu_samples_memory_total_check",
-        "gpu_samples_utilization_check",
-    ):
-        assert constraint_name in content
-    assert "DROP CONSTRAINT IF EXISTS" in content
-
-
-def test_smtp_settings_are_added_in_separate_migration() -> None:
-    migration = MIGRATION.with_name("0003_smtp_settings.py")
-    content = migration.read_text(encoding="utf-8")
-    assert 'down_revision = "0002_access_requests"' in content
-    assert "CREATE TABLE smtp_settings" in content
-    assert "CREATE TABLE smtp_settings" not in MIGRATION.read_text(encoding="utf-8")
-
-
-def test_migration_chain_contains_smtp_settings_revision() -> None:
-    versions = sorted(MIGRATION.parent.glob("*.py"))
-    assert [path.name for path in versions] == [
-        "0001_initial.py",
-        "0002_access_requests.py",
-        "0003_smtp_settings.py",
-        "0004_api_base_url.py",
-    ]
-
-
-def test_api_base_url_is_added_after_smtp_settings() -> None:
-    migration = MIGRATION.with_name("0004_api_base_url.py")
-    content = migration.read_text(encoding="utf-8")
-    assert 'down_revision = "0003_smtp_settings"' in content
-    assert "CREATE TABLE system_settings" in content
-    assert "api_base_url varchar(2048)" in content
-
-
-def test_model_metadata_does_not_recreate_check_constraints() -> None:
     checks = [
         constraint
         for table in Base.metadata.tables.values()

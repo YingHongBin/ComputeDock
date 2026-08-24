@@ -17,23 +17,19 @@ from computedock_monitor.services import (
 
 
 def test_resource_allocation_deduplicates_shared_gpu() -> None:
-    resource = ComputeResource(
-        id=uuid.uuid4(), name="r", gpu_model="A100", gpu_count=2, token="cdr_token"
-    )
+    resource = ComputeResource(id=uuid.uuid4(), name="r", gpu_model="A100", gpu_count=2)
     containers = [
         ContainerInstance(current_gpu_ids=["GPU-1", "GPU-2"], removed_at=None),
         ContainerInstance(current_gpu_ids=["GPU-1"], removed_at=None),
     ]
     card = resource_card(resource, containers)
-    assert card.token == "cdr_token"
+    assert "token" not in card.model_dump()
     assert card.allocated_gpu_count == 2
     assert card.available_gpu_count == 0
 
 
 def test_resource_allocation_marks_overallocation() -> None:
-    resource = ComputeResource(
-        id=uuid.uuid4(), name="r", gpu_model="A100", gpu_count=1, token="cdr_token"
-    )
+    resource = ComputeResource(id=uuid.uuid4(), name="r", gpu_model="A100", gpu_count=1)
     card = resource_card(
         resource,
         [ContainerInstance(current_gpu_ids=["GPU-1", "GPU-2"], removed_at=None)],

@@ -39,8 +39,7 @@ def require_user(
             db.delete(record)
             db.commit()
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "session expired")
-    user_id = record.user_id or record.admin_id
-    user = db.get(User, user_id) if user_id is not None else None
+    user = db.get(User, record.user_id)
     if user is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "user not found")
     if user.status != "active":

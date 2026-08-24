@@ -169,6 +169,10 @@ def get_general_settings(
     saved = db.get(SystemSetting, 1)
     return GeneralSettingsView(
         api_base_url=effective_api_base_url(db, settings),
+        low_utilization_warning_enabled=(
+            saved.low_utilization_warning_enabled if saved is not None else True
+        ),
+        low_utilization_threshold=(saved.low_utilization_threshold if saved is not None else 10),
         source="database" if saved is not None else "environment",
     )
 
@@ -185,8 +189,14 @@ def update_general_settings(
         saved = SystemSetting(id=1, updated_by_id=auth.user.id, updated_at=utcnow())
         db.add(saved)
     else:
-        before = {"api_base_url": saved.api_base_url}
+        before = {
+            "api_base_url": saved.api_base_url,
+            "low_utilization_warning_enabled": saved.low_utilization_warning_enabled,
+            "low_utilization_threshold": saved.low_utilization_threshold,
+        }
     saved.api_base_url = payload.api_base_url
+    saved.low_utilization_warning_enabled = payload.low_utilization_warning_enabled
+    saved.low_utilization_threshold = payload.low_utilization_threshold
     saved.updated_by_id = auth.user.id
     saved.updated_at = utcnow()
     record_audit(
@@ -196,7 +206,16 @@ def update_general_settings(
         "system_settings",
         "1",
         before=before,
-        after={"api_base_url": saved.api_base_url},
+        after={
+            "api_base_url": saved.api_base_url,
+            "low_utilization_warning_enabled": saved.low_utilization_warning_enabled,
+            "low_utilization_threshold": saved.low_utilization_threshold,
+        },
     )
     db.commit()
-    return GeneralSettingsView(api_base_url=saved.api_base_url, source="database")
+    return GeneralSettingsView(
+        api_base_url=saved.api_base_url,
+        low_utilization_warning_enabled=saved.low_utilization_warning_enabled,
+        low_utilization_threshold=saved.low_utilization_threshold,
+        source="database",
+    )

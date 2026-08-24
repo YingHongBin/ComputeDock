@@ -1,4 +1,4 @@
-import { CopyOutlined, PauseCircleOutlined, PlayCircleOutlined, PlusOutlined } from '@ant-design/icons'
+import { PauseCircleOutlined, PlayCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import { App, Button, Card, Col, Empty, Flex, Row, Statistic, Tag, Tooltip, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import { api, csrfHeaders, errorMessage } from '../api'
@@ -41,16 +41,6 @@ export function OverviewPage() {
       message.error(errorMessage(error))
     } finally {
       setSubmitting(false)
-    }
-  }
-
-  const copyToken = async (resource: ResourceCardData) => {
-    if (!resource.token) return
-    try {
-      await navigator.clipboard.writeText(resource.token)
-      message.success('Token 已复制')
-    } catch {
-      message.error('Token 复制失败')
     }
   }
 
@@ -97,17 +87,6 @@ export function OverviewPage() {
                   <Flex align="center" gap={4}>
                     {resource.overallocated && <Tag color="error">超配</Tag>}
                     {resource.status === 'disabled' && <Tag>已禁用</Tag>}
-                    {session?.role === 'admin' && resource.token && <Tooltip title="复制历史 Token">
-                      <Button
-                        type="text"
-                        icon={<CopyOutlined />}
-                        aria-label="复制 Token"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          void copyToken(resource)
-                        }}
-                      />
-                    </Tooltip>}
                     {session?.role === 'admin' && (
                       <Tooltip title={resource.status === 'active' ? '禁用资源' : '启用资源'}>
                         <Button

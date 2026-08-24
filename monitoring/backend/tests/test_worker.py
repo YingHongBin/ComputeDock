@@ -1,7 +1,25 @@
 from datetime import UTC, date, datetime
 
+from computedock_monitor.config import Settings
 from computedock_monitor.models import NotificationOutbox
-from computedock_monitor.worker import ROLLUP_SQL, day_window, render_notification
+from computedock_monitor.worker import (
+    ROLLUP_SQL,
+    aggregation_cutoff_day,
+    day_window,
+    render_notification,
+    warning_target_day,
+)
+
+
+def worker_settings() -> Settings:
+    return Settings(
+        database_url="sqlite://",
+        admin_username="admin",
+        admin_password="long-enough-test-password",
+        admin_full_name="Administrator",
+        admin_email="admin@example.test",
+        business_timezone="Asia/Shanghai",
+    )
 
 
 def test_business_day_uses_shanghai_midnight() -> None:
@@ -14,6 +32,17 @@ def test_rollup_sql_is_hourly_and_idempotent() -> None:
     assert "date_trunc('hour'" in ROLLUP_SQL
     assert "ON CONFLICT (container_id, gpuid, bucket_start) DO UPDATE" in ROLLUP_SQL
     assert "make_interval(secs => :offline_seconds)" in ROLLUP_SQL
+    assert "SUM(utilization * observed_seconds)" in ROLLUP_SQL
+
+
+def test_daily_jobs_wait_until_eight_in_business_timezone() -> None:
+    settings = worker_settings()
+    before_eight = datetime(2026, 8, 10, 23, 59, tzinfo=UTC)  # 07:59 in Shanghai
+    at_eight = datetime(2026, 8, 11, 0, 0, tzinfo=UTC)  # 08:00 in Shanghai
+    assert aggregation_cutoff_day(settings, before_eight) == date(2026, 8, 9)
+    assert warning_target_day(settings, before_eight) is None
+    assert aggregation_cutoff_day(settings, at_eight) == date(2026, 8, 10)
+    assert warning_target_day(settings, at_eight) == date(2026, 8, 10)
 
 
 def test_notification_renderer_includes_action_link() -> None:
@@ -54,3 +83,44 @@ def test_compute_request_admin_notice_includes_applicant_details() -> None:
     assert "算力资源：H100 Cluster" in body
     assert "GPU 数量：2" in body
     assert "使用天数：7" in body
+
+
+def test_low_utilization_warning_lists_grouped_containers() -> None:
+    notification = NotificationOutbox(
+        template="low_utilization_warning",
+        to_address="user@example.test",
+        cc_addresses=["admin@example.test"],
+        payload={
+            "full_name": "Test User",
+            "applicant_name": "Test User",
+            "project_name": "Project One",
+            "resource_name": "H100 Cluster",
+            "approved_gpu_count": 4,
+            "statistics_date": "2026-08-10",
+            "threshold": 10,
+            "request_expired": True,
+            "containers": [
+                {
+                    "name": "training-a",
+                    "usage_rate": 3.456,
+                    "gpu_count": 2,
+                    "first_reported_at": "2026-08-10 00:01:00",
+                    "last_reported_at": "2026-08-10 23:59:00",
+                },
+                {
+                    "name": "training-b",
+                    "usage_rate": 8.0,
+                    "gpu_count": 2,
+                    "first_reported_at": "2026-08-10 01:00:00",
+                    "last_reported_at": "2026-08-10 20:00:00",
+                },
+            ],
+        },
+    )
+
+    subject, body = render_notification(notification)
+
+    assert subject == "算力容器 GPU 使用率过低预警"
+    assert "申请状态：已到期" in body
+    assert "training-a：平均 GPU 使用率 3.46%" in body
+    assert "training-b：平均 GPU 使用率 8.00%" in body

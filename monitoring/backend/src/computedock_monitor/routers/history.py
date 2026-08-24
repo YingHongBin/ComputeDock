@@ -25,6 +25,7 @@ from ..schemas import (
     HourlyHistorySeries,
 )
 from ..security import as_utc, utcnow
+from ..services import container_context
 
 router = APIRouter(prefix="/api/v1/history", tags=["history"])
 
@@ -94,6 +95,13 @@ def list_history_containers(
                 last_received_at=container.last_received_at,
                 removed_at=container.removed_at,
                 expires_at=request.expires_at,
+                usage_summary_status=container.usage_summary_status,
+                usage_duration_seconds=container.usage_duration_seconds,
+                usage_gpu_count=container.usage_gpu_count,
+                usage_gpu_utilization_avg=container.usage_gpu_utilization_avg,
+                usage_gpu_utilization_max=container.usage_gpu_utilization_max,
+                usage_memory_utilization_avg=container.usage_memory_utilization_avg,
+                usage_memory_utilization_max=container.usage_memory_utilization_max,
             )
         )
     return result
@@ -106,11 +114,7 @@ def history_container_chart(
     db: Session = Depends(get_db),
 ) -> HistoryContainerChart:
     container = db.get(ContainerInstance, container_id)
-    if (
-        container is None
-        or container.compute_request_id is None
-        or container.removed_at is None
-    ):
+    if container is None or container.removed_at is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "historical container not found")
     rollups = list(
         db.scalars(
@@ -133,13 +137,15 @@ def history_container_chart(
                 sample_count=item.sample_count,
             )
         )
+    project_name, applicant_name = container_context(db, container)
     return HistoryContainerChart(
         container_id=container.id,
         container_name=container.name,
+        project_name=project_name,
+        applicant_name=applicant_name,
         first_reported_at=container.first_reported_at,
         removed_at=container.removed_at,
         series=[
-            HourlyHistorySeries(gpuid=gpuid, points=points)
-            for gpuid, points in by_gpu.items()
+            HourlyHistorySeries(gpuid=gpuid, points=points) for gpuid, points in by_gpu.items()
         ],
     )

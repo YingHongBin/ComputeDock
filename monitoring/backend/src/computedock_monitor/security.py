@@ -40,10 +40,6 @@ def verify_password(password_hash: str, password: str) -> bool:
         return False
 
 
-def make_resource_token() -> str:
-    return f"cdr_{secrets.token_urlsafe(32)}"
-
-
 def make_compute_request_token() -> str:
     return f"cda_{secrets.token_urlsafe(32)}"
 
