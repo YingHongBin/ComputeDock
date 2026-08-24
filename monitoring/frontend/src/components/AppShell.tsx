@@ -18,9 +18,9 @@ export function AppShell({ children }: PropsWithChildren) {
     { path: '/requests', label: '算力申请' },
     ...(session?.role === 'admin' ? [
       { path: '/users', label: '用户管理' },
-      { path: '/projects', label: '项目管理' },
+      { path: '/projects', label: 'Squad管理' },
       { path: '/history/users', label: '用户历史' },
-      { path: '/history/projects', label: '项目历史' },
+      { path: '/history/projects', label: 'Squad历史' },
       { path: '/settings', label: '设置' },
     ] : []),
   ]

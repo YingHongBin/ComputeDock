@@ -114,7 +114,7 @@ export function ResourceDetailPage({ resourceId }: { resourceId: string }) {
 
   const columns = useMemo<ColumnsType<ContainerSummary>>(() => [
     {
-      title: '项目 / 申请人',
+      title: 'Squad / 申请人',
       fixed: 'left',
       width: 220,
       render: (_, row) => (

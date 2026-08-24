@@ -62,11 +62,11 @@ def validate_request_relations(
     if applicant.status != "active":
         raise HTTPException(status.HTTP_409_CONFLICT, "applicant is disabled")
     if project.status != "active":
-        raise HTTPException(status.HTTP_409_CONFLICT, "project is disabled")
+        raise HTTPException(status.HTTP_409_CONFLICT, "Squad is disabled")
     if resource.disabled_at is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "resource is disabled")
     if not is_project_member(db, project.id, applicant.id):
-        raise HTTPException(status.HTTP_409_CONFLICT, "applicant is not a project member")
+        raise HTTPException(status.HTTP_409_CONFLICT, "applicant is not a Squad member")
 
 
 def actual_gpu_count(db: Session, request_id: uuid.UUID) -> int:
@@ -193,7 +193,7 @@ def create_compute_request(
     project = db.get(Project, payload.project_id)
     resource = db.get(ComputeResource, payload.resource_id)
     if project is None or resource is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "project or resource not found")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Squad or resource not found")
     validate_request_relations(db, auth.user, project, resource)
     if payload.gpu_count > resource.gpu_count:
         raise HTTPException(

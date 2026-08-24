@@ -79,7 +79,7 @@ def test_compute_request_admin_notice_includes_applicant_details() -> None:
     assert subject == "有新的算力申请待审核"
     assert "您好，管理员：" in body
     assert "申请人姓名：GPU Applicant" in body
-    assert "项目：GPU Project" in body
+    assert "Squad：GPU Project" in body
     assert "算力资源：H100 Cluster" in body
     assert "GPU 数量：2" in body
     assert "使用天数：7" in body
@@ -121,6 +121,7 @@ def test_low_utilization_warning_lists_grouped_containers() -> None:
     subject, body = render_notification(notification)
 
     assert subject == "算力容器 GPU 使用率过低预警"
+    assert "Squad：Project One" in body
     assert "申请状态：已到期" in body
     assert "training-a：平均 GPU 使用率 3.46%" in body
     assert "training-b：平均 GPU 使用率 8.00%" in body

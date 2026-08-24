@@ -132,7 +132,7 @@ def create_project(
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "project name already exists") from exc
+        raise HTTPException(status.HTTP_409_CONFLICT, "Squad name already exists") from exc
     return project_view(db, project)
 
 
@@ -145,7 +145,7 @@ def update_project(
 ) -> ProjectView:
     project = db.scalar(select(Project).where(Project.id == project_id).with_for_update())
     if project is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "project not found")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Squad not found")
     old_members = [str(user.id) for user in project_members(db, project.id)]
     members = validated_members(db, payload.member_ids)
     before = {
@@ -174,7 +174,7 @@ def update_project(
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "project name already exists") from exc
+        raise HTTPException(status.HTTP_409_CONFLICT, "Squad name already exists") from exc
     return project_view(db, project)
 
 
@@ -182,7 +182,7 @@ def reject_pending_for_project(
     db: Session, project_id: uuid.UUID, reviewer_id: uuid.UUID
 ) -> None:
     now = utcnow()
-    reason = "关联项目已禁用"
+    reason = "关联Squad已禁用"
     request_ids = select(ComputeRequest.id).where(ComputeRequest.project_id == project_id)
     db.execute(
         update(ComputeRequest)
@@ -219,7 +219,7 @@ def set_project_status(
 ) -> ProjectView:
     project = db.scalar(select(Project).where(Project.id == project_id).with_for_update())
     if project is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "project not found")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Squad not found")
     before = project.status
     project.status = target_status
     project.updated_at = utcnow()

@@ -58,7 +58,7 @@ export function HistoryPage({ mode }: { mode: 'users' | 'projects' }) {
 
   const requestColumns: ColumnsType<ComputeRequestData> = [
     { title: '申请人', dataIndex: 'applicant_name' },
-    { title: '项目', dataIndex: 'project_name' },
+    { title: 'Squad', dataIndex: 'project_name' },
     { title: '资源', dataIndex: 'resource_name' },
     { title: 'GPU', dataIndex: 'gpu_count', width: 80 },
     { title: '天数', dataIndex: 'duration_days', width: 80 },
@@ -67,7 +67,7 @@ export function HistoryPage({ mode }: { mode: 'users' | 'projects' }) {
   ]
 
   const containerColumns: ColumnsType<HistoryContainerData> = [
-    { title: '项目', dataIndex: 'project_name' },
+    { title: 'Squad', dataIndex: 'project_name' },
     { title: '申请人', dataIndex: 'applicant_name' },
     { title: '内部容器', dataIndex: 'name', render: (value, row) => <Space>{value}{row.generation > 1 && <Tag>第 {row.generation} 代</Tag>}</Space> },
     { title: '资源', dataIndex: 'resource_name' },
@@ -92,7 +92,7 @@ export function HistoryPage({ mode }: { mode: 'users' | 'projects' }) {
   return (
     <section>
       <div className="page-heading">
-        <Typography.Title level={2}>{mode === 'users' ? '用户历史' : '项目历史'}</Typography.Title>
+        <Typography.Title level={2}>{mode === 'users' ? '用户历史' : 'Squad历史'}</Typography.Title>
         <Typography.Text type="secondary">查看历史算力申请、容器及容器趋势，不统计卡天。</Typography.Text>
       </div>
       <Card className="section-card">
@@ -100,7 +100,7 @@ export function HistoryPage({ mode }: { mode: 'users' | 'projects' }) {
           className="history-entity-select"
           showSearch
           optionFilterProp="label"
-          placeholder={mode === 'users' ? '选择用户' : '选择项目'}
+          placeholder={mode === 'users' ? '选择用户' : '选择Squad'}
           options={entities}
           value={selected}
           onChange={setSelected}

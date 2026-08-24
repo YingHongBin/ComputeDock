@@ -33,7 +33,7 @@ from .smtp import SmtpConnectionSettings, effective_smtp_settings, send_email
 
 AUTO_REJECTION_REASONS = {
     "关联用户已禁用",
-    "关联项目已禁用",
+    "关联Squad已禁用",
     "关联算力资源已禁用",
     "原申请已到期",
 }
@@ -71,7 +71,7 @@ def render_notification(notification: NotificationOutbox) -> tuple[str, str]:
         lines = [f"您好，{recipient_name}：", "", subject]
         for key, label in (
             ("applicant_name", "申请人姓名"),
-            ("project_name", "项目"),
+            ("project_name", "Squad"),
             ("resource_name", "算力资源"),
             ("approved_gpu_count", "申请 GPU 数量"),
             ("statistics_date", "统计日期"),
@@ -118,7 +118,7 @@ def render_notification(notification: NotificationOutbox) -> tuple[str, str]:
         lines.append(subject)
         for key, label in (
             ("applicant_name", "申请人姓名"),
-            ("project_name", "项目"),
+            ("project_name", "Squad"),
             ("resource_name", "算力资源"),
             ("gpu_count", "GPU 数量"),
             ("duration_days", "使用天数"),

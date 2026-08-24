@@ -146,7 +146,7 @@ export function RequestsPage() {
 
   const columns = useMemo<ColumnsType<ComputeRequestData>>(() => [
     { title: '申请人', dataIndex: 'applicant_name', width: 120 },
-    { title: '项目', dataIndex: 'project_name', width: 150 },
+    { title: 'Squad', dataIndex: 'project_name', width: 150 },
     { title: '算力资源', dataIndex: 'resource_name', width: 150 },
     { title: 'GPU', dataIndex: 'gpu_count', width: 80, render: (value, row) => <span>{value} 张{row.over_quota && <Tag color="error" className="inline-tag">超额 {row.actual_gpu_count}</Tag>}</span> },
     { title: '天数', dataIndex: 'duration_days', width: 80 },
@@ -226,7 +226,7 @@ export function RequestsPage() {
 
       <Modal title="新建算力申请" open={requestOpen} onCancel={() => setRequestOpen(false)} onOk={() => requestForm.submit()} confirmLoading={busy} destroyOnHidden>
         <Form form={requestForm} layout="vertical" onFinish={submitRequest} preserve={false}>
-          <Form.Item name="project_id" label="所属项目" rules={[{ required: true }]}>
+          <Form.Item name="project_id" label="所属Squad" rules={[{ required: true }]}>
             <Select options={availableProjects.map((item) => ({ value: item.id, label: item.name }))} />
           </Form.Item>
           <Form.Item name="resource_id" label="算力资源" rules={[{ required: true }]}>
