@@ -1,5 +1,5 @@
-import { PauseCircleOutlined, PlayCircleOutlined, PlusOutlined } from '@ant-design/icons'
-import { App, Button, Card, Col, Empty, Flex, Row, Statistic, Tag, Tooltip, Typography } from 'antd'
+import { PlusOutlined } from '@ant-design/icons'
+import { App, Button, Card, Col, Empty, Flex, Row, Statistic, Tag, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import { api, csrfHeaders, errorMessage } from '../api'
 import { useAuth } from '../auth'
@@ -44,20 +44,6 @@ export function OverviewPage() {
     }
   }
 
-  const toggleResource = async (resource: ResourceCardData) => {
-    if (!session || session.role !== 'admin') return
-    try {
-      const action = resource.status === 'active' ? 'disable' : 'enable'
-      await api.post(`/resources/${resource.id}/${action}`, undefined, {
-        headers: csrfHeaders(session.csrf_token),
-      })
-      message.success(resource.status === 'active' ? '算力资源已禁用' : '算力资源已启用')
-      await load()
-    } catch (error) {
-      message.error(errorMessage(error))
-    }
-  }
-
   return (
     <section>
       <Flex justify="space-between" align="center" className="page-heading">
@@ -87,15 +73,6 @@ export function OverviewPage() {
                   <Flex align="center" gap={4}>
                     {resource.overallocated && <Tag color="error">超配</Tag>}
                     {resource.status === 'disabled' && <Tag>已禁用</Tag>}
-                    {session?.role === 'admin' && (
-                      <Tooltip title={resource.status === 'active' ? '禁用资源' : '启用资源'}>
-                        <Button
-                          type="text"
-                          icon={resource.status === 'active' ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
-                          onClick={(event) => { event.stopPropagation(); void toggleResource(resource) }}
-                        />
-                      </Tooltip>
-                    )}
                   </Flex>
                 </Flex>
                 <Row gutter={12} className="resource-stats">
