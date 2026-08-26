@@ -45,6 +45,7 @@ body { margin: 0; min-width: 320px; min-height: 100vh; }
 .login-links { margin-top: 12px; }
 .form-footer-button { margin-top: 18px; }
 .inline-tag { margin-left: 8px; }
+.request-review-comment { display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .history-entity-select { width: min(460px, 100%); }
 .history-filter { width: 180px; margin-bottom: 16px; }
 .clickable-row { cursor: pointer; }

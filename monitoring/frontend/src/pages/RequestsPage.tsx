@@ -1,5 +1,5 @@
 import { CopyOutlined, PlusOutlined } from '@ant-design/icons'
-import { App, Button, Card, Flex, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd'
+import { App, Button, Card, Flex, Form, Input, InputNumber, Modal, Select, Space, Table, Tabs, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useEffect, useMemo, useState } from 'react'
@@ -23,6 +23,26 @@ const runtimeLabels = {
 const changeLabels = { extend: '延时', expand: '扩容', release: '释放' }
 
 type ReviewTarget = { request: ComputeRequestData; change?: ComputeRequestChangeData }
+type ApprovalStatus = ComputeRequestData['approval_status']
+
+const identityColumns: ColumnsType<ComputeRequestData> = [
+  { title: '申请人', dataIndex: 'applicant_name', width: 120 },
+  { title: 'Squad', dataIndex: 'project_name', width: 150 },
+  { title: '算力资源', dataIndex: 'resource_name', width: 150 },
+]
+
+export function requestsForTab(requests: ComputeRequestData[], activeTab: ApprovalStatus) {
+  return requests
+    .filter((request) => request.approval_status === activeTab)
+    .sort((left, right) => {
+      if (activeTab === 'pending') {
+        return dayjs(left.created_at).valueOf() - dayjs(right.created_at).valueOf()
+      }
+      const leftReviewedAt = left.reviewed_at ?? left.created_at
+      const rightReviewedAt = right.reviewed_at ?? right.created_at
+      return dayjs(rightReviewedAt).valueOf() - dayjs(leftReviewedAt).valueOf()
+    })
+}
 
 export function RequestsPage() {
   const { session } = useAuth()
@@ -36,6 +56,7 @@ export function RequestsPage() {
   const [requestOpen, setRequestOpen] = useState(false)
   const [changeTarget, setChangeTarget] = useState<ComputeRequestData | null>(null)
   const [reviewTarget, setReviewTarget] = useState<ReviewTarget | null>(null)
+  const [activeTab, setActiveTab] = useState<ApprovalStatus>('pending')
   const [busy, setBusy] = useState(false)
   const [requestForm] = Form.useForm()
   const [changeForm] = Form.useForm()
@@ -143,31 +164,65 @@ export function RequestsPage() {
     }
   }
 
-  const columns = useMemo<ColumnsType<ComputeRequestData>>(() => [
-    { title: '申请人', dataIndex: 'applicant_name', width: 120 },
-    { title: 'Squad', dataIndex: 'project_name', width: 150 },
-    { title: '算力资源', dataIndex: 'resource_name', width: 150 },
+  const pendingColumns = useMemo<ColumnsType<ComputeRequestData>>(() => [
+    ...identityColumns,
+    { title: '申请 GPU 数量', dataIndex: 'gpu_count', width: 120, render: (value) => `${value} 张` },
+    { title: '申请天数', dataIndex: 'duration_days', width: 100, render: (value) => `${value} 天` },
+    { title: '提交时间', dataIndex: 'created_at', width: 170, render: (value) => dayjs(value).format('YYYY-MM-DD HH:mm') },
+    ...(session?.role === 'admin' ? [{
+      title: '操作', width: 100, fixed: 'right' as const, render: (_: unknown, row: ComputeRequestData) => (
+        <Button size="small" type="primary" onClick={() => setReviewTarget({ request: row })}>审核</Button>
+      ),
+    }] : []),
+  ], [session?.role])
+
+  const approvedColumns = useMemo<ColumnsType<ComputeRequestData>>(() => [
+    ...identityColumns,
     { title: 'GPU', dataIndex: 'gpu_count', width: 80, render: (value, row) => <span>{value} 张{row.over_quota && <Tag color="error" className="inline-tag">超额 {row.actual_gpu_count}</Tag>}</span> },
-    { title: '天数', dataIndex: 'duration_days', width: 80 },
-    { title: '审批', dataIndex: 'approval_status', width: 100, render: (value: keyof typeof approvalLabels) => <Tag color={approvalLabels[value][1]}>{approvalLabels[value][0]}</Tag> },
+    { title: '使用天数', dataIndex: 'duration_days', width: 100, render: (value) => `${value} 天` },
     { title: '运行', dataIndex: 'runtime_status', width: 110, render: (value: keyof typeof runtimeLabels | null) => value ? <Tag color={runtimeLabels[value][1]}>{runtimeLabels[value][0]}</Tag> : '--' },
+    { title: '首次上报时间', dataIndex: 'started_at', width: 170, render: (value) => value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '--' },
     { title: '到期时间', dataIndex: 'expires_at', width: 170, render: (value) => value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '--' },
     {
       title: '操作', width: 230, fixed: 'right', render: (_, row) => (
         <Space wrap>
-          {session?.role === 'admin' && row.approval_status === 'pending' && (
-            <Button size="small" type="primary" onClick={() => setReviewTarget({ request: row })}>审核</Button>
-          )}
           {session?.role === 'admin' && row.token && (
             <Button size="small" icon={<CopyOutlined />} onClick={() => void copyToken(row.token!)}>复制 Token</Button>
           )}
-          {row.applicant_username === session?.username && row.approval_status === 'approved' && row.runtime_status !== 'not_started' && row.runtime_status !== 'expired' && !row.changes.some((item) => item.approval_status === 'pending') && (
+          {row.applicant_username === session?.username && row.runtime_status !== 'not_started' && row.runtime_status !== 'expired' && !row.changes.some((item) => item.approval_status === 'pending') && (
             <Button size="small" onClick={() => setChangeTarget(row)}>申请变更</Button>
           )}
         </Space>
       ),
     },
   ], [session])
+
+  const rejectedColumns = useMemo<ColumnsType<ComputeRequestData>>(() => [
+    ...identityColumns,
+    { title: '申请 GPU 数量', dataIndex: 'gpu_count', width: 120, render: (value) => `${value} 张` },
+    { title: '申请天数', dataIndex: 'duration_days', width: 100, render: (value) => `${value} 天` },
+    { title: '提交时间', dataIndex: 'created_at', width: 170, render: (value) => dayjs(value).format('YYYY-MM-DD HH:mm') },
+    { title: '审核人', dataIndex: 'reviewer_name', width: 120, render: (value) => value || '--' },
+    {
+      title: '拒绝说明',
+      dataIndex: 'review_comment',
+      width: 260,
+      render: (value) => value ? (
+        <Tooltip title={value}>
+          <span className="request-review-comment">{value}</span>
+        </Tooltip>
+      ) : '--',
+    },
+    { title: '拒绝时间', dataIndex: 'reviewed_at', width: 170, render: (value) => value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '--' },
+  ], [])
+
+  const visibleRequests = useMemo(() => requestsForTab(requests, activeTab), [activeTab, requests])
+
+  const columns = activeTab === 'pending'
+    ? pendingColumns
+    : activeTab === 'approved'
+      ? approvedColumns
+      : rejectedColumns
 
   return (
     <section>
@@ -179,13 +234,24 @@ export function RequestsPage() {
         <Button type="primary" icon={<PlusOutlined />} onClick={showUsageNotice} disabled={!availableProjects.length || !availableResources.length}>新建申请</Button>
       </Flex>
       <Card>
+        <Tabs
+          activeKey={activeTab}
+          onChange={(key) => setActiveTab(key as ApprovalStatus)}
+          items={[
+            { key: 'pending', label: '申请中' },
+            { key: 'approved', label: '已通过' },
+            { key: 'rejected', label: '已拒绝' },
+          ]}
+        />
         <Table
+          key={activeTab}
           rowKey="id"
           loading={loading}
           columns={columns}
-          dataSource={requests}
+          dataSource={visibleRequests}
           scroll={{ x: 1200 }}
-          expandable={{
+          expandable={activeTab === 'approved' ? {
+            rowExpandable: (row) => row.changes.length > 0,
             expandedRowRender: (row) => row.changes.length ? (
               <Space direction="vertical" className="full-width">
                 {row.changes.map((change) => (
@@ -201,7 +267,7 @@ export function RequestsPage() {
                 ))}
               </Space>
             ) : <Typography.Text type="secondary">暂无变更记录</Typography.Text>,
-          }}
+          } : undefined}
         />
       </Card>
 
