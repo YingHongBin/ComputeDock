@@ -21,9 +21,19 @@ const runtimeLabels = {
 } as const
 
 const changeLabels = { extend: '延时', expand: '扩容', release: '释放' }
+const pendingTypeLabels = { new: '新申请', ...changeLabels }
 
 type ReviewTarget = { request: ComputeRequestData; change?: ComputeRequestChangeData }
 type ApprovalStatus = ComputeRequestData['approval_status']
+type PendingApplicationType = 'new' | ComputeRequestChangeData['change_type']
+
+export interface PendingApplication {
+  id: string
+  type: PendingApplicationType
+  request: ComputeRequestData
+  change?: ComputeRequestChangeData
+  created_at: string
+}
 
 const identityColumns: ColumnsType<ComputeRequestData> = [
   { title: '申请人', dataIndex: 'applicant_name', width: 120 },
@@ -42,6 +52,42 @@ export function requestsForTab(requests: ComputeRequestData[], activeTab: Approv
       const rightReviewedAt = right.reviewed_at ?? right.created_at
       return dayjs(rightReviewedAt).valueOf() - dayjs(leftReviewedAt).valueOf()
     })
+}
+
+export function pendingApplications(requests: ComputeRequestData[]): PendingApplication[] {
+  return requests
+    .flatMap((request) => [
+      ...(request.approval_status === 'pending' ? [{
+        id: `request:${request.id}`,
+        type: 'new' as const,
+        request,
+        created_at: request.created_at,
+      }] : []),
+      ...request.changes
+        .filter((change) => change.approval_status === 'pending')
+        .map((change) => ({
+          id: `change:${change.id}`,
+          type: change.change_type,
+          request,
+          change,
+          created_at: change.created_at,
+        })),
+    ])
+    .sort((left, right) => dayjs(left.created_at).valueOf() - dayjs(right.created_at).valueOf())
+}
+
+function requestContent(request: ComputeRequestData) {
+  return `${request.gpu_count} 张 GPU / ${request.duration_days} 天`
+}
+
+function changeContent(change: ComputeRequestChangeData) {
+  if (change.change_type === 'extend') {
+    return `使用天数 ${change.before_value} → ${change.after_value}（增加 ${change.amount} 天）`
+  }
+  if (change.change_type === 'expand') {
+    return `GPU ${change.before_value} → ${change.after_value}（增加 ${change.amount} 张）`
+  }
+  return `GPU ${change.before_value} → ${change.after_value}（释放 ${change.amount} 张）`
 }
 
 export function RequestsPage() {
@@ -164,14 +210,16 @@ export function RequestsPage() {
     }
   }
 
-  const pendingColumns = useMemo<ColumnsType<ComputeRequestData>>(() => [
-    ...identityColumns,
-    { title: '申请 GPU 数量', dataIndex: 'gpu_count', width: 120, render: (value) => `${value} 张` },
-    { title: '申请天数', dataIndex: 'duration_days', width: 100, render: (value) => `${value} 天` },
+  const pendingColumns = useMemo<ColumnsType<PendingApplication>>(() => [
+    { title: '申请类型', dataIndex: 'type', width: 100, render: (value: PendingApplicationType) => <Tag>{pendingTypeLabels[value]}</Tag> },
+    { title: '申请人', width: 120, render: (_, row) => row.request.applicant_name },
+    { title: 'Squad', width: 150, render: (_, row) => row.request.project_name },
+    { title: '算力资源', width: 150, render: (_, row) => row.request.resource_name },
+    { title: '申请内容', width: 260, render: (_, row) => row.change ? changeContent(row.change) : requestContent(row.request) },
     { title: '提交时间', dataIndex: 'created_at', width: 170, render: (value) => dayjs(value).format('YYYY-MM-DD HH:mm') },
     ...(session?.role === 'admin' ? [{
-      title: '操作', width: 100, fixed: 'right' as const, render: (_: unknown, row: ComputeRequestData) => (
-        <Button size="small" type="primary" onClick={() => setReviewTarget({ request: row })}>审核</Button>
+      title: '操作', width: 100, fixed: 'right' as const, render: (_: unknown, row: PendingApplication) => (
+        <Button size="small" type="primary" onClick={() => setReviewTarget({ request: row.request, change: row.change })}>审核</Button>
       ),
     }] : []),
   ], [session?.role])
@@ -217,12 +265,9 @@ export function RequestsPage() {
   ], [])
 
   const visibleRequests = useMemo(() => requestsForTab(requests, activeTab), [activeTab, requests])
+  const pendingItems = useMemo(() => pendingApplications(requests), [requests])
 
-  const columns = activeTab === 'pending'
-    ? pendingColumns
-    : activeTab === 'approved'
-      ? approvedColumns
-      : rejectedColumns
+  const reviewedColumns = activeTab === 'approved' ? approvedColumns : rejectedColumns
 
   return (
     <section>
@@ -243,32 +288,40 @@ export function RequestsPage() {
             { key: 'rejected', label: '已拒绝' },
           ]}
         />
-        <Table
-          key={activeTab}
-          rowKey="id"
-          loading={loading}
-          columns={columns}
-          dataSource={visibleRequests}
-          scroll={{ x: 1200 }}
-          expandable={activeTab === 'approved' ? {
-            rowExpandable: (row) => row.changes.length > 0,
-            expandedRowRender: (row) => row.changes.length ? (
-              <Space direction="vertical" className="full-width">
-                {row.changes.map((change) => (
-                  <Flex key={change.id} gap={12} align="center" wrap>
-                    <Tag>{changeLabels[change.change_type]}</Tag>
-                    <span>{change.before_value} → {change.after_value}</span>
-                    <Tag color={approvalLabels[change.approval_status][1]}>{approvalLabels[change.approval_status][0]}</Tag>
-                    {change.review_comment && <Typography.Text type="secondary">{change.review_comment}</Typography.Text>}
-                    {session?.role === 'admin' && change.approval_status === 'pending' && (
-                      <Button size="small" type="primary" onClick={() => setReviewTarget({ request: row, change })}>审核变更</Button>
-                    )}
-                  </Flex>
-                ))}
-              </Space>
-            ) : <Typography.Text type="secondary">暂无变更记录</Typography.Text>,
-          } : undefined}
-        />
+        {activeTab === 'pending' ? (
+          <Table
+            key="pending"
+            rowKey="id"
+            loading={loading}
+            columns={pendingColumns}
+            dataSource={pendingItems}
+            scroll={{ x: 1000 }}
+          />
+        ) : (
+          <Table
+            key={activeTab}
+            rowKey="id"
+            loading={loading}
+            columns={reviewedColumns}
+            dataSource={visibleRequests}
+            scroll={{ x: 1200 }}
+            expandable={activeTab === 'approved' ? {
+              rowExpandable: (row) => row.changes.length > 0,
+              expandedRowRender: (row) => row.changes.length ? (
+                <Space direction="vertical" className="full-width">
+                  {row.changes.map((change) => (
+                    <Flex key={change.id} gap={12} align="center" wrap>
+                      <Tag>{changeLabels[change.change_type]}</Tag>
+                      <span>{change.before_value} → {change.after_value}</span>
+                      <Tag color={approvalLabels[change.approval_status][1]}>{approvalLabels[change.approval_status][0]}</Tag>
+                      {change.review_comment && <Typography.Text type="secondary">{change.review_comment}</Typography.Text>}
+                    </Flex>
+                  ))}
+                </Space>
+              ) : <Typography.Text type="secondary">暂无变更记录</Typography.Text>,
+            } : undefined}
+          />
+        )}
       </Card>
 
       <Modal
@@ -328,7 +381,24 @@ export function RequestsPage() {
         </Form>
       </Modal>
 
-      <Modal title="审核" open={!!reviewTarget} onCancel={() => setReviewTarget(null)} onOk={() => reviewForm.submit()} confirmLoading={busy} destroyOnHidden>
+      <Modal
+        title={reviewTarget?.change ? `审核${changeLabels[reviewTarget.change.change_type]}申请` : '审核算力申请'}
+        open={!!reviewTarget}
+        onCancel={() => setReviewTarget(null)}
+        onOk={() => reviewForm.submit()}
+        confirmLoading={busy}
+        destroyOnHidden
+      >
+        {reviewTarget && (
+          <Flex vertical gap={4} className="review-target-summary">
+            <Typography.Text type="secondary">
+              {reviewTarget.request.applicant_name} · {reviewTarget.request.project_name} · {reviewTarget.request.resource_name}
+            </Typography.Text>
+            <Typography.Text strong>
+              {reviewTarget.change ? changeContent(reviewTarget.change) : requestContent(reviewTarget.request)}
+            </Typography.Text>
+          </Flex>
+        )}
         <Form form={reviewForm} layout="vertical" onFinish={submitReview} preserve={false} initialValues={{ decision: 'approved' }}>
           <Form.Item name="decision" label="审核结果" rules={[{ required: true }]}>
             <Select options={[{ value: 'approved', label: '通过' }, { value: 'rejected', label: '拒绝' }]} />
