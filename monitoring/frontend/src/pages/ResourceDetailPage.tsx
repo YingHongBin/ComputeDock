@@ -21,6 +21,14 @@ function usage(value: number | null) {
   return value === null ? '--' : `${value.toFixed(1)}%`
 }
 
+export function expirationState(value: string | null, now = dayjs()) {
+  if (!value) return null
+  const expiresAt = dayjs(value)
+  if (expiresAt.valueOf() <= now.valueOf()) return 'expired'
+  if (expiresAt.valueOf() <= now.add(1, 'day').valueOf()) return 'expiring'
+  return 'active'
+}
+
 export function ResourceDetailPage({ resourceId }: { resourceId: string }) {
   const { session } = useAuth()
   const { message, modal } = App.useApp()
@@ -125,7 +133,22 @@ export function ResourceDetailPage({ resourceId }: { resourceId: string }) {
       ),
     },
     { title: '状态', dataIndex: 'status', width: 90, render: (status) => status === 'online' ? <Tag color="success">在线</Tag> : <Tag>失联</Tag> },
-    { title: '最后上报', dataIndex: 'last_received_at', width: 170, render: (value) => dayjs(value).format('YYYY-MM-DD HH:mm:ss') },
+    {
+      title: '计划到期时间',
+      dataIndex: 'expires_at',
+      width: 250,
+      render: (value: string | null) => {
+        const state = expirationState(value)
+        if (!value || !state) return '--'
+        return (
+          <Space size={6}>
+            <span>{dayjs(value).format('YYYY-MM-DD HH:mm:ss')}</span>
+            {state === 'expiring' && <Tag color="warning">即将到期</Tag>}
+            {state === 'expired' && <Tag color="error">已到期</Tag>}
+          </Space>
+        )
+      },
+    },
     { title: '分配显卡', dataIndex: 'allocated_gpu_count', width: 100 },
     { title: '近 1 小时', dataIndex: 'utilization_1h', width: 100, render: usage },
     { title: '近 6 小时', dataIndex: 'utilization_6h', width: 100, render: usage },
@@ -162,7 +185,7 @@ export function ResourceDetailPage({ resourceId }: { resourceId: string }) {
           columns={columns}
           dataSource={containers}
           pagination={false}
-          scroll={{ x: 980 }}
+          scroll={{ x: 1140 }}
           rowClassName={(row) => row.id === selectedId ? 'selected-row' : ''}
           onRow={(row) => ({ onClick: () => setSelectedId(row.id) })}
         />

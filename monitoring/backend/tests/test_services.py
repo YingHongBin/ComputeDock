@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
@@ -10,6 +11,7 @@ from computedock_monitor.services import (
     RANGES,
     aligned_chart_window,
     canonical_payload_hash,
+    container_summaries,
     resource_card,
     start_compute_request,
     validate_collection_time,
@@ -89,3 +91,34 @@ def test_compute_request_starts_once_from_first_received_report() -> None:
     assert not start_compute_request(request, second)
     assert request.started_at == first
     assert request.expires_at == first + timedelta(days=7)
+
+
+def test_container_summaries_include_and_sort_by_planned_expiration(monkeypatch) -> None:
+    now = datetime(2026, 9, 8, 12, tzinfo=UTC)
+    expires_at = now + timedelta(days=3)
+    resource_id = uuid.uuid4()
+    container = ContainerInstance(
+        id=uuid.uuid4(),
+        resource_id=resource_id,
+        compute_request_id=uuid.uuid4(),
+        name="training",
+        generation=1,
+        first_reported_at=now,
+        last_received_at=now,
+        latest_collected_at=now,
+        current_gpu_ids=["GPU-1"],
+    )
+    db = MagicMock()
+    db.execute.side_effect = [[(container, expires_at)], []]
+    monkeypatch.setattr("computedock_monitor.services.utcnow", lambda: now)
+    monkeypatch.setattr(
+        "computedock_monitor.services.container_context",
+        lambda _db, _container: ("Squad", "Applicant"),
+    )
+
+    summaries = container_summaries(db, resource_id, offline_seconds=300)
+
+    assert summaries[0].expires_at == expires_at
+    query = str(db.execute.call_args_list[0].args[0])
+    assert "compute_requests.expires_at ASC NULLS LAST" in query
+    assert "container_instances.last_received_at DESC" in query

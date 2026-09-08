@@ -261,17 +261,21 @@ def container_summaries(
     resource_id: uuid.UUID,
     offline_seconds: int,
 ) -> list[ContainerSummary]:
-    containers = list(
-        db.scalars(
-            select(ContainerInstance)
+    container_rows = list(
+        db.execute(
+            select(ContainerInstance, ComputeRequest.expires_at)
+            .join(ComputeRequest, ComputeRequest.id == ContainerInstance.compute_request_id)
             .where(
                 ContainerInstance.resource_id == resource_id,
                 ContainerInstance.removed_at.is_(None),
             )
-            .order_by(ContainerInstance.last_received_at.desc())
+            .order_by(
+                ComputeRequest.expires_at.asc().nulls_last(),
+                ContainerInstance.last_received_at.desc(),
+            )
         )
     )
-    if not containers:
+    if not container_rows:
         return []
     rows = db.execute(
         text(
@@ -303,7 +307,7 @@ def container_summaries(
     usage = {row.container_id: row for row in rows}
     threshold = utcnow() - timedelta(seconds=offline_seconds)
     result: list[ContainerSummary] = []
-    for container in containers:
+    for container, expires_at in container_rows:
         project_name, applicant_name = container_context(db, container)
         result.append(
             ContainerSummary(
@@ -314,6 +318,7 @@ def container_summaries(
                 generation=container.generation,
                 status="online" if container.last_received_at >= threshold else "offline",
                 last_received_at=container.last_received_at,
+                expires_at=expires_at,
                 allocated_gpu_count=len(container.current_gpu_ids),
                 utilization_1h=_rounded(getattr(usage.get(container.id), "utilization_1h", None)),
                 utilization_6h=_rounded(getattr(usage.get(container.id), "utilization_6h", None)),

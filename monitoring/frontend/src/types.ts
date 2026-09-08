@@ -33,6 +33,7 @@ export interface ContainerSummary {
   generation: number
   status: 'online' | 'offline'
   last_received_at: string
+  expires_at: string | null
   allocated_gpu_count: number
   utilization_1h: number | null
   utilization_6h: number | null

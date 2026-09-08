@@ -405,6 +405,7 @@ class ContainerSummary(BaseModel):
     generation: int
     status: Literal["online", "offline"]
     last_received_at: datetime
+    expires_at: datetime | None
     allocated_gpu_count: int
     utilization_1h: float | None
     utilization_6h: float | None
