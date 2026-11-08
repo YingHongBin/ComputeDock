@@ -844,7 +844,7 @@ def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatc
     assert response.json()["token"] is None
     response = client.post(
         f"/api/v1/compute-requests/{request_id}/changes",
-        json={"change_type": "extend", "amount": 14},
+        json={"change_type": "time", "days_delta": 14},
         headers={"X-CSRF-Token": applicant_csrf},
     )
     assert response.status_code == 409
@@ -856,7 +856,7 @@ def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatc
         db.commit()
     response = client.post(
         f"/api/v1/compute-requests/{request_id}/changes",
-        json={"change_type": "extend", "amount": 14},
+        json={"change_type": "time", "days_delta": 14},
         headers={"X-CSRF-Token": applicant_csrf},
     )
     assert response.status_code == 201, response.text

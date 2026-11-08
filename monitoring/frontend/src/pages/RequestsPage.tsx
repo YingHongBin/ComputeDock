@@ -20,7 +20,7 @@ const runtimeLabels = {
   expired: ['已到期', 'error'],
 } as const
 
-const changeLabels = { extend: '延时', expand: 'GPU 扩容', release: 'GPU 释放', cpu: 'CPU 调整', memory: '内存调整' }
+const changeLabels = { time: '时间调整', config: '配置调整' }
 const pendingTypeLabels = { new: '新申请', ...changeLabels }
 
 type ReviewTarget = { request: ComputeRequestData; change?: ComputeRequestChangeData }
@@ -86,18 +86,12 @@ function requestContent(request: ComputeRequestData) {
   return `${request.gpu_count} 张 GPU / ${request.cpu_cores} 核 CPU / ${request.memory_gib} GiB 内存 / ${request.duration_days} 天`
 }
 
-function changeContent(change: ComputeRequestChangeData) {
-  if (change.change_type === 'cpu' || change.change_type === 'memory') {
-    const label = change.change_type === 'cpu' ? 'CPU（核）' : '内存（GiB）'
-    return `${label} ${change.before_value} → ${change.after_value}`
+export function changeContent(change: ComputeRequestChangeData) {
+  if (change.change_type === 'time') {
+    const delta = change.days_delta ?? 0
+    return `使用天数 ${change.before_value.duration_days} → ${change.after_value.duration_days}（${delta > 0 ? '增加' : '减少'} ${Math.abs(delta)} 天）`
   }
-  if (change.change_type === 'extend') {
-    return `使用天数 ${change.before_value} → ${change.after_value}（增加 ${change.amount} 天）`
-  }
-  if (change.change_type === 'expand') {
-    return `GPU ${change.before_value} → ${change.after_value}（增加 ${change.amount} 张）`
-  }
-  return `GPU ${change.before_value} → ${change.after_value}（释放 ${change.amount} 张）`
+  return `GPU ${change.before_value.gpu_count} → ${change.after_value.gpu_count} 张 / CPU ${change.before_value.cpu_cores} → ${change.after_value.cpu_cores} 核 / 内存 ${change.before_value.memory_gib} → ${change.after_value.memory_gib} GiB`
 }
 
 export function RequestsPage() {
@@ -117,6 +111,10 @@ export function RequestsPage() {
   const [requestForm] = Form.useForm()
   const [changeForm] = Form.useForm()
   const [reviewForm] = Form.useForm()
+  const changeType = Form.useWatch('change_type', changeForm)
+  const changeDirection = Form.useWatch('direction', changeForm)
+  const changeDays = Form.useWatch('days', changeForm)
+  const changeResource = resources.find((item) => item.id === changeTarget?.resource_id)
   const selectedResourceId = Form.useWatch('resource_id', requestForm)
   const requestedGpu = Form.useWatch('gpu_count', requestForm)
   const requestedCpu = Form.useWatch('cpu_cores', requestForm)
@@ -194,7 +192,10 @@ export function RequestsPage() {
     if (!session || !changeTarget) return
     setBusy(true)
     try {
-      await api.post(`/compute-requests/${changeTarget.id}/changes`, values, {
+      const payload = values.change_type === 'time'
+        ? { change_type: 'time', days_delta: Number(values.days) * (values.direction === 'decrease' ? -1 : 1) }
+        : { change_type: 'config', gpu_count: values.gpu_count, cpu_cores: values.cpu_cores, memory_gib: values.memory_gib }
+      await api.post(`/compute-requests/${changeTarget.id}/changes`, payload, {
         headers: csrfHeaders(session.csrf_token),
       })
       message.success('变更申请已提交')
@@ -421,19 +422,40 @@ export function RequestsPage() {
 
       <Modal title="申请变更" open={!!changeTarget} onCancel={() => setChangeTarget(null)} onOk={() => changeForm.submit()} confirmLoading={busy} destroyOnHidden>
         {changeTarget && <Typography.Paragraph type="secondary">
-          当前获批：{requestContent(changeTarget)}。CPU、内存填写调整后的总量；审批通过后，已有容器需由管理员同步调整配置。
+          当前获批：{requestContent(changeTarget)}。审批通过后生效，已有容器的配置需由管理员同步调整。
         </Typography.Paragraph>}
-        <Form form={changeForm} layout="vertical" onFinish={submitChange} preserve={false}>
+        <Form form={changeForm} layout="vertical" onFinish={submitChange} preserve={false} initialValues={{
+          change_type: 'config', direction: 'increase', days: 1,
+          gpu_count: changeTarget?.gpu_count, cpu_cores: changeTarget?.cpu_cores, memory_gib: changeTarget?.memory_gib,
+        }}>
           <Form.Item name="change_type" label="变更类型" rules={[{ required: true }]}>
-            <Select options={Object.entries(changeLabels).filter(([value]) => changeTarget?.runtime_status !== 'not_started' || value === 'cpu' || value === 'memory').map(([value, label]) => ({ value, label }))} onChange={() => changeForm.setFieldValue('amount', undefined)} />
+            <Select options={[
+              { value: 'time', label: '时间调整', disabled: changeTarget?.runtime_status === 'not_started' },
+              { value: 'config', label: '配置调整' },
+            ]} />
           </Form.Item>
-          <Form.Item noStyle shouldUpdate={(previous, current) => previous.change_type !== current.change_type}>
-            {({ getFieldValue }) => (
-              <Form.Item name="amount" label={getFieldValue('change_type') === 'cpu' ? '调整后的 CPU 总核心数' : getFieldValue('change_type') === 'memory' ? '调整后的内存总量（GiB）' : getFieldValue('change_type') === 'extend' ? '增加天数' : '增加或释放 GPU 张数'} rules={[{ required: true }]}>
-                <InputNumber min={1} max={getFieldValue('change_type') === 'extend' ? 14 : undefined} precision={0} className="full-width" />
-              </Form.Item>
-            )}
-          </Form.Item>
+          {changeTarget?.runtime_status === 'not_started' && <Typography.Paragraph type="secondary">首次上报开始计时后可申请时间调整。</Typography.Paragraph>}
+          {changeType === 'time' ? <>
+            <Form.Item name="direction" label="调整方向" rules={[{ required: true }]}>
+              <Select options={[{ value: 'increase', label: '增加天数' }, { value: 'decrease', label: '减少天数' }]} />
+            </Form.Item>
+            <Form.Item name="days" label="调整天数" rules={[{ required: true, type: 'integer', min: 1, max: 14 }]} extra="单次调整 1–14 天，减少后到期时间必须晚于当前时间。">
+              <InputNumber min={1} max={14} precision={0} className="full-width" />
+            </Form.Item>
+            {changeTarget?.expires_at && changeDays > 0 && <Typography.Paragraph>
+              到期时间：{dayjs(changeTarget.expires_at).format('YYYY-MM-DD HH:mm')} → {dayjs(changeTarget.expires_at).add(changeDirection === 'decrease' ? -changeDays : changeDays, 'day').format('YYYY-MM-DD HH:mm')}
+            </Typography.Paragraph>}
+          </> : <>
+            <Form.Item name="gpu_count" label="调整后的 GPU 数量" rules={[{ required: true, type: 'integer', min: 0, max: changeResource?.gpu_count }]}>
+              <InputNumber min={0} max={changeResource?.gpu_count} precision={0} className="full-width" />
+            </Form.Item>
+            <Form.Item name="cpu_cores" label="调整后的 CPU 总核心数" rules={[{ required: true, type: 'integer', min: 1, max: changeResource?.cpu_cores }]}>
+              <InputNumber min={1} max={changeResource?.cpu_cores} precision={0} className="full-width" />
+            </Form.Item>
+            <Form.Item name="memory_gib" label="调整后的内存总量（GiB）" rules={[{ required: true, type: 'integer', min: 1, max: changeResource?.memory_gib }]}>
+              <InputNumber min={1} max={changeResource?.memory_gib} precision={0} className="full-width" />
+            </Form.Item>
+          </>}
         </Form>
       </Modal>
 

@@ -82,7 +82,7 @@ test('申请自动填入默认值，显示超配并允许超过剩余额度提�
   expect((await submitted).postDataJSON()).toMatchObject({ resource_id: 'resource-b', gpu_count: 0, cpu_cores: 16, memory_gib: 64, duration_days: 7 })
 })
 
-test('获批未启动申请可以单独调整 CPU，提交目标总量', async ({ page }) => {
+test('配置调整预填当前 GPU、CPU 和内存，并整组提交', async ({ page }) => {
   await page.route('**/api/v1/compute-requests', async (route) => route.fulfill({ json: [{
     id: 'request-a', applicant_id: 'admin', applicant_username: 'admin', applicant_name: '管理员',
     project_id: 'squad', project_name: 'Research', resource_id: 'resource-a', resource_name: 'A100 服务器',
@@ -95,10 +95,40 @@ test('获批未启动申请可以单独调整 CPU，提交目标总量', async (
   await page.getByRole('tab', { name: '已通过' }).click()
   await page.getByRole('button', { name: '申请变更' }).click()
   const dialog = page.getByRole('dialog')
-  await dialog.getByLabel('变更类型').click()
-  await page.locator('.ant-select-item-option-content').getByText('CPU 调整', { exact: true }).click()
+  await expect(dialog.getByLabel('调整后的 GPU 数量')).toHaveValue('2')
+  await expect(dialog.getByLabel('调整后的 CPU 总核心数')).toHaveValue('8')
+  await expect(dialog.getByLabel('调整后的内存总量（GiB）')).toHaveValue('32')
+  await dialog.getByLabel('调整后的 GPU 数量').fill('0')
+  await dialog.getByLabel('调整后的内存总量（GiB）').fill('64')
   await dialog.getByLabel('调整后的 CPU 总核心数').fill('12')
   const submitted = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/request-a/changes'))
   await dialog.getByRole('button', { name: /确\s*定/ }).click()
-  expect((await submitted).postDataJSON()).toEqual({ change_type: 'cpu', amount: 12 })
+  expect((await submitted).postDataJSON()).toEqual({ change_type: 'config', gpu_count: 0, cpu_cores: 12, memory_gib: 64 })
+})
+
+test('时间调整支持增加和减少天数', async ({ page }) => {
+  await page.route('**/api/v1/compute-requests', async (route) => route.fulfill({ json: [{
+    id: 'request-time', applicant_id: 'admin', applicant_username: 'admin', applicant_name: '管理员',
+    project_id: 'squad', project_name: 'Research', resource_id: 'resource-a', resource_name: 'A100 服务器',
+    gpu_count: 2, cpu_cores: 8, memory_gib: 32, duration_days: 7,
+    approval_status: 'approved', runtime_status: 'running', actual_gpu_count: 0,
+    over_quota: false, reviewer_name: '管理员', review_comment: null, reviewed_at: null,
+    token: 'cda_example', started_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 7 * 86400000).toISOString(), created_at: new Date().toISOString(), changes: [],
+  }] }))
+  await page.goto('/requests')
+  await page.getByRole('tab', { name: '已通过' }).click()
+  for (const [direction, delta] of [['增加天数', 3], ['减少天数', -2]] as const) {
+    await page.getByRole('button', { name: '申请变更' }).click()
+    const dialog = page.getByRole('dialog')
+    await dialog.getByLabel('变更类型').click()
+    await page.locator('.ant-select-item-option-content').getByText('时间调整', { exact: true }).click()
+    await dialog.getByLabel('调整方向').click()
+    await page.locator('.ant-select-item-option-content').getByText(direction, { exact: true }).click()
+    await dialog.getByLabel('调整天数', { exact: true }).fill(String(Math.abs(delta)))
+    const submitted = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/request-time/changes'))
+    await dialog.getByRole('button', { name: /确\s*定/ }).click()
+    expect((await submitted).postDataJSON()).toEqual({ change_type: 'time', days_delta: delta })
+    await expect(dialog).toHaveCount(0)
+  }
 })

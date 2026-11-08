@@ -155,11 +155,11 @@ export interface ProjectData {
 
 export interface ComputeRequestChangeData {
   id: string
-  change_type: 'extend' | 'expand' | 'release' | 'cpu' | 'memory'
-  amount: number
+  change_type: 'time' | 'config'
+  days_delta: number | null
   approval_status: 'pending' | 'approved' | 'rejected'
-  before_value: number
-  after_value: number
+  before_value: Record<string, number>
+  after_value: Record<string, number>
   reviewer_name: string | null
   review_comment: string | null
   reviewed_at: string | null

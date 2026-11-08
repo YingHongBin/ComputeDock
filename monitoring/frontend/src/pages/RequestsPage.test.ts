@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ComputeRequestChangeData, ComputeRequestData } from '../types'
-import { pendingApplications, requestsForTab } from './RequestsPage'
+import { changeContent, pendingApplications, requestsForTab } from './RequestsPage'
 
 function request(
   id: string,
@@ -39,11 +39,14 @@ function request(
 function change(id: string, createdAt: string) {
   return {
     id,
-    change_type: 'expand',
+    change_type: 'config',
     approval_status: 'pending',
-    amount: 2,
-    before_value: 2,
-    after_value: 4,
+    days_delta: null,
+    reviewer_name: null,
+    review_comment: null,
+    reviewed_at: null,
+    before_value: { gpu_count: 2, cpu_cores: 8, memory_gib: 32 },
+    after_value: { gpu_count: 4, cpu_cores: 16, memory_gib: 64 },
     created_at: createdAt,
   } as ComputeRequestChangeData
 }
@@ -82,4 +85,13 @@ describe('requestsForTab', () => {
     ])
     expect(requestsForTab(requests, 'rejected').map((item) => item.id)).toEqual(['rejected'])
   })
+})
+
+
+it('describes time reductions and the complete configuration change', () => {
+  const config = change('c', '2026-11-07T00:00:00Z')
+  expect(changeContent(config)).toBe('GPU 2 → 4 张 / CPU 8 → 16 核 / 内存 32 → 64 GiB')
+  expect(changeContent({ ...config, change_type: 'time', days_delta: -2,
+    before_value: { duration_days: 7 }, after_value: { duration_days: 5 },
+  })).toBe('使用天数 7 → 5（减少 2 天）')
 })

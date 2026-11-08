@@ -66,6 +66,14 @@ def context(monkeypatch):
     return client, sessions, headers, resource, project, apply, resource_input
 
 
+def configuration(request, **changes):
+    return {
+        "change_type": "config",
+        **{key: request[key] for key in ("gpu_count", "cpu_cores", "memory_gib")},
+        **changes,
+    }
+
+
 def card(context):
     client, _, _, resource, *_ = context
     return client.get(f"/api/v1/resources/{resource['id']}").json()
@@ -133,20 +141,18 @@ def test_remaining_counts_approved_unstarted_and_allows_overcommit(context):
     assert client.get("/api/v1/resources").json()[0]["reserved_cpu_cores"] == 24
 
 
-@pytest.mark.parametrize(
-    ("change_type", "field", "target"), [("cpu", "cpu_cores", 12), ("memory", "memory_gib", 48)]
-)
-def test_independent_changes_apply_only_on_approval(context, change_type, field, target):
+@pytest.mark.parametrize(("field", "target"), [("cpu_cores", 12), ("memory_gib", 48)])
+def test_configuration_changes_apply_only_on_approval(context, field, target):
     client, sessions, headers, _, _, apply, _ = context
     request = apply(approve=True)
     url = f"/api/v1/compute-requests/{request['id']}"
     # CPU/memory can change after approval, even before first report.
     change = client.post(
-        url + "/changes", json={"change_type": change_type, "amount": target}, headers=headers
+        url + "/changes", json=configuration(request, **{field: target}), headers=headers
     )
     assert change.status_code == 201, change.text
-    assert change.json()["before_value"] == request[field]
-    assert change.json()["after_value"] == target
+    assert change.json()["before_value"][field] == request[field]
+    assert change.json()["after_value"][field] == target
     assert card(context)["reserved_" + field] == request[field]
     result = client.post(
         url + f"/changes/{change.json()['id']}/review",
@@ -158,11 +164,11 @@ def test_independent_changes_apply_only_on_approval(context, change_type, field,
     assert card(context)["reserved_" + field] == target
     with sessions() as db:
         audit = db.scalar(select(AuditEvent).where(AuditEvent.action == "compute_change.approved"))
-        assert audit.after["after_value"] == target
+        assert audit.after["after_value"][field] == target
     # Increasing back to the original amount is also supported, without approval side effects.
     change = client.post(
         url + "/changes",
-        json={"change_type": change_type, "amount": request[field]},
+        json=configuration(request),
         headers=headers,
     )
     assert change.status_code == 201
@@ -196,12 +202,12 @@ def test_change_review_rechecks_capacity_and_enforces_positive_target(context):
     for amount in (0, -1, 33, 8):
         assert (
             client.post(
-                url + "/changes", json={"change_type": "cpu", "amount": amount}, headers=headers
+                url + "/changes", json=configuration(request, cpu_cores=amount), headers=headers
             ).status_code
             == 422
         )
     change = client.post(
-        url + "/changes", json={"change_type": "cpu", "amount": 24}, headers=headers
+        url + "/changes", json=configuration(request, cpu_cores=24), headers=headers
     ).json()
     with sessions() as db:
         db.get(ComputeResource, uuid.UUID(resource["id"])).cpu_cores = 16
@@ -320,9 +326,9 @@ def test_zero_gpu_request_reports_heartbeat_and_can_expand_release(context):
     payload["collected_at"] = utcnow().isoformat()
     assert client.post("/api/v1/agent/samples", json=payload, headers=auth).status_code == 200
     assert client.get(url).json()["expires_at"] == running["expires_at"]
-    for change_type in ("expand", "release"):
+    for gpu_count in (1, 0):
         change = client.post(
-            url + "/changes", json={"change_type": change_type, "amount": 1}, headers=headers
+            url + "/changes", json=configuration(request, gpu_count=gpu_count), headers=headers
         )
         assert change.status_code == 201, change.text
         reviewed = client.post(
@@ -334,7 +340,7 @@ def test_zero_gpu_request_reports_heartbeat_and_can_expand_release(context):
     assert client.get(url).json()["gpu_count"] == 0
     assert (
         client.post(
-            url + "/changes", json={"change_type": "release", "amount": 1}, headers=headers
+            url + "/changes", json=configuration(request, gpu_count=-1), headers=headers
         ).status_code
         == 422
     )
@@ -384,3 +390,110 @@ def test_resource_description_is_saved_updated_and_clearable(context):
         url, json={**payload, "name": "documented", "description": ""}, headers=headers
     )
     assert cleared.json()["description"] == ""
+
+
+@pytest.mark.parametrize("delta", [3, -2])
+def test_time_adjustments_update_expiry_only_after_approval(context, delta):
+    client, sessions, headers, _, _, apply, _ = context
+    request = apply(approve=True)
+    start = utcnow()
+    with sessions() as db:
+        record = db.get(ComputeRequest, uuid.UUID(request["id"]))
+        record.started_at = start
+        record.expires_at = start + timedelta(days=7)
+        db.commit()
+    url = f"/api/v1/compute-requests/{request['id']}"
+    original = client.get(url).json()
+    change = client.post(
+        url + "/changes", json={"change_type": "time", "days_delta": delta}, headers=headers
+    )
+    assert change.status_code == 201, change.text
+    assert change.json()["after_value"] == {"duration_days": 7 + delta}
+    assert client.get(url).json()["expires_at"] == original["expires_at"]
+    reviewed = client.post(
+        url + f"/changes/{change.json()['id']}/review",
+        json={"decision": "approved"},
+        headers=headers,
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    with sessions() as db:
+        record = db.get(ComputeRequest, uuid.UUID(request["id"]))
+        assert record.duration_days == 7 + delta
+        assert record.expires_at.replace(tzinfo=start.tzinfo) == start + timedelta(days=7 + delta)
+        assert record.gpu_count == request["gpu_count"]
+        assert record.cpu_cores == request["cpu_cores"]
+        assert record.memory_gib == request["memory_gib"]
+
+
+def test_time_reduction_validated_at_submission_and_review(context):
+    client, sessions, headers, _, _, apply, _ = context
+    request = apply(approve=True)
+    with sessions() as db:
+        record = db.get(ComputeRequest, uuid.UUID(request["id"]))
+        record.started_at = utcnow()
+        record.expires_at = utcnow() + timedelta(days=7)
+        db.commit()
+    url = f"/api/v1/compute-requests/{request['id']}"
+    for delta in (0, -7, -14, 15, -15, 1.5):
+        response = client.post(
+            url + "/changes", json={"change_type": "time", "days_delta": delta}, headers=headers
+        )
+        assert response.status_code == 422
+    change = client.post(
+        url + "/changes", json={"change_type": "time", "days_delta": -2}, headers=headers
+    ).json()
+    with sessions() as db:
+        record = db.get(ComputeRequest, uuid.UUID(request["id"]))
+        record.expires_at = utcnow() + timedelta(days=1)
+        db.commit()
+    reviewed = client.post(
+        url + f"/changes/{change['id']}/review", json={"decision": "approved"}, headers=headers
+    )
+    assert reviewed.status_code == 409
+    assert client.get(url).json()["duration_days"] == 7
+
+
+def test_configuration_is_atomic_and_requires_all_fields(context):
+    client, _, headers, _, _, apply, _ = context
+    request = apply(approve=True)
+    url = f"/api/v1/compute-requests/{request['id']}"
+    assert (
+        client.post(
+            url + "/changes", json={"change_type": "config", "gpu_count": 0}, headers=headers
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            url + "/changes", json={**configuration(request), "days_delta": 1}, headers=headers
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            url + "/changes", json=configuration(request, cpu_cores=100), headers=headers
+        ).status_code
+        == 422
+    )
+    change = client.post(
+        url + "/changes",
+        json=configuration(request, gpu_count=0, cpu_cores=12, memory_gib=64),
+        headers=headers,
+    )
+    assert change.status_code == 201
+    assert (
+        client.post(
+            url + "/changes", json=configuration(request, cpu_cores=16), headers=headers
+        ).status_code
+        == 409
+    )
+    assert client.get(url).json()["gpu_count"] == request["gpu_count"]
+    reviewed = client.post(
+        url + f"/changes/{change.json()['id']}/review",
+        json={"decision": "approved"},
+        headers=headers,
+    )
+    assert reviewed.status_code == 200
+    updated = client.get(url).json()
+    assert (updated["gpu_count"], updated["cpu_cores"], updated["memory_gib"]) == (0, 12, 64)
+    assert updated["duration_days"] == 7

@@ -125,11 +125,25 @@ def render_notification(notification: NotificationOutbox) -> tuple[str, str]:
             ("memory_gib", "内存（GiB）"),
             ("duration_days", "使用天数"),
             ("change_type", "变更类型"),
-            ("amount", "变更数量"),
+            ("days_delta", "调整天数（正数增加，负数减少）"),
+            ("before_value", "调整前"),
+            ("after_value", "调整后"),
             ("expires_at", "到期时间"),
             ("comment", "审核意见"),
         ):
             value = payload.get(key)
+            if key in ("before_value", "after_value") and isinstance(value, dict):
+                fields = (
+                    ("gpu_count", "GPU", "张"),
+                    ("cpu_cores", "CPU", "核"),
+                    ("memory_gib", "内存", "GiB"),
+                    ("duration_days", "使用天数", "天"),
+                )
+                value = " / ".join(
+                    f"{name} {value[field]} {unit}"
+                    for field, name, unit in fields
+                    if field in value
+                )
             if value not in (None, ""):
                 lines.append(f"{label}：{value}")
     lines.extend(["", "此邮件由 ComputeDock 自动发送。"])

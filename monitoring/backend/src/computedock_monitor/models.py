@@ -193,10 +193,10 @@ class ComputeRequestChange(Base):
         Uuid, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
     change_type: Mapped[str] = mapped_column(String(20), nullable=False)
-    amount: Mapped[int] = mapped_column(Integer, nullable=False)
+    days_delta: Mapped[int | None] = mapped_column(Integer)
     approval_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
-    before_value: Mapped[int] = mapped_column(Integer, nullable=False)
-    after_value: Mapped[int] = mapped_column(Integer, nullable=False)
+    before_value: Mapped[dict[str, int]] = mapped_column(JsonType, nullable=False)
+    after_value: Mapped[dict[str, int]] = mapped_column(JsonType, nullable=False)
     reviewer_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("users.id", ondelete="RESTRICT")
     )

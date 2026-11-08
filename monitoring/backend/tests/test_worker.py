@@ -129,3 +129,21 @@ def test_low_utilization_warning_lists_grouped_containers() -> None:
     assert "申请状态：已到期" in body
     assert "training-a：平均 GPU 使用率 3.46%" in body
     assert "training-b：平均 GPU 使用率 8.00%" in body
+
+
+def test_configuration_notice_formats_before_and_after_values() -> None:
+    notice = NotificationOutbox(
+        template="compute_change_pending_admin",
+        to_address="admin@example.test",
+        cc_addresses=[],
+        payload={
+            "applicant_name": "Applicant",
+            "change_type": "配置调整",
+            "days_delta": None,
+            "before_value": {"gpu_count": 2, "cpu_cores": 8, "memory_gib": 32},
+            "after_value": {"gpu_count": 0, "cpu_cores": 16, "memory_gib": 64},
+        },
+    )
+    _, body = render_notification(notice)
+    assert "调整前：GPU 2 张 / CPU 8 核 / 内存 32 GiB" in body
+    assert "调整后：GPU 0 张 / CPU 16 核 / 内存 64 GiB" in body

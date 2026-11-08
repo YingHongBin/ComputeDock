@@ -227,24 +227,32 @@ class ComputeRequestInput(BaseModel):
 
 
 class ComputeRequestChangeInput(BaseModel):
-    change_type: Literal["extend", "expand", "release", "cpu", "memory"]
-    # CPU/memory amounts are absolute targets; GPU/day amounts are increments.
-    amount: int = Field(gt=0, strict=True)
+    model_config = {"extra": "forbid"}
+
+    change_type: Literal["time", "config"]
+    days_delta: int | None = Field(default=None, ge=-14, le=14, strict=True)
+    gpu_count: int | None = Field(default=None, ge=0, le=10000, strict=True)
+    cpu_cores: int | None = Field(default=None, gt=0, le=100000, strict=True)
+    memory_gib: int | None = Field(default=None, gt=0, le=1048576, strict=True)
 
     @model_validator(mode="after")
-    def validate_extension_days(self):
-        if self.change_type == "extend" and self.amount > 14:
-            raise ValueError("extension days must be between 1 and 14")
+    def validate_change(self):
+        config = (self.gpu_count, self.cpu_cores, self.memory_gib)
+        if self.change_type == "time":
+            if self.days_delta in (None, 0) or any(value is not None for value in config):
+                raise ValueError("时间调整需填写非零的增减天数，不能同时调整配置")
+        elif self.days_delta is not None or any(value is None for value in config):
+            raise ValueError("配置调整需填写 GPU、CPU 和内存，不能同时调整时间")
         return self
 
 
 class ComputeRequestChangeView(BaseModel):
     id: uuid.UUID
-    change_type: Literal["extend", "expand", "release", "cpu", "memory"]
-    amount: int
+    change_type: Literal["time", "config"]
+    days_delta: int | None
     approval_status: Literal["pending", "approved", "rejected"]
-    before_value: int
-    after_value: int
+    before_value: dict[str, int]
+    after_value: dict[str, int]
     reviewer_name: str | None
     review_comment: str | None
     reviewed_at: datetime | None

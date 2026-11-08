@@ -94,7 +94,7 @@ def change_view(db: Session, change: ComputeRequestChange) -> ComputeRequestChan
     return ComputeRequestChangeView(
         id=change.id,
         change_type=change.change_type,  # type: ignore[arg-type]
-        amount=change.amount,
+        days_delta=change.days_delta,
         approval_status=change.approval_status,  # type: ignore[arg-type]
         before_value=change.before_value,
         after_value=change.after_value,
@@ -321,33 +321,44 @@ def validate_capacity(
             raise HTTPException(status_code, f"requested {label} exceed resource capacity")
 
 
-CHANGE_FIELDS = {
-    "expand": "gpu_count",
-    "release": "gpu_count",
-    "cpu": "cpu_cores",
-    "memory": "memory_gib",
-}
+CONFIG_FIELDS = ("gpu_count", "cpu_cores", "memory_gib")
 
 
-def validate_change_capacity(
-    change_type: str, after_value: int, resource: ComputeResource, status_code: int
+def validate_change_target(
+    request: ComputeRequest,
+    resource: ComputeResource,
+    change_type: str,
+    after_value: dict[str, int],
+    days_delta: int | None,
+    status_code: int,
 ) -> None:
-    field = CHANGE_FIELDS.get(change_type)
-    minimum = 0 if field == "gpu_count" else 1
-    if field and (after_value < minimum or after_value > getattr(resource, field)):
-        raise HTTPException(
-            status_code, "changed allocation is outside the allowed resource range"
+    if change_type == "config":
+        for field in CONFIG_FIELDS:
+            minimum = 0 if field == "gpu_count" else 1
+            if not minimum <= after_value[field] <= getattr(resource, field):
+                raise HTTPException(status_code, "调整后的配置超出服务器容量或低于允许的最小值")
+    else:
+        if after_value["duration_days"] < 1:
+            raise HTTPException(status_code, "调整后的使用天数不能少于 1 天")
+        if (
+            request.expires_at is not None
+            and as_utc(request.expires_at) + timedelta(days=days_delta or 0) <= utcnow()
+        ):
+            raise HTTPException(status_code, "减少天数后到期时间必须晚于当前时间")
+
+
+def change_values(
+    request: ComputeRequest, payload: ComputeRequestChangeInput
+) -> tuple[dict[str, int], dict[str, int]]:
+    if payload.change_type == "time":
+        return (
+            {"duration_days": request.duration_days},
+            {"duration_days": request.duration_days + (payload.days_delta or 0)},
         )
-
-
-def change_values(request: ComputeRequest, payload: ComputeRequestChangeInput) -> tuple[int, int]:
-    if payload.change_type in ("cpu", "memory"):
-        return getattr(request, CHANGE_FIELDS[payload.change_type]), payload.amount
-    if payload.change_type == "extend":
-        return request.duration_days, request.duration_days + payload.amount
-    if payload.change_type == "expand":
-        return request.gpu_count, request.gpu_count + payload.amount
-    return request.gpu_count, request.gpu_count - payload.amount
+    return (
+        {field: getattr(request, field) for field in CONFIG_FIELDS},
+        {field: getattr(payload, field) for field in CONFIG_FIELDS},
+    )
 
 
 @router.post(
@@ -368,7 +379,7 @@ def create_compute_request_change(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "compute request not found")
     if request.approval_status != "approved":
         raise HTTPException(status.HTTP_409_CONFLICT, "compute request is not approved")
-    if request.started_at is None and payload.change_type not in ("cpu", "memory"):
+    if request.started_at is None and payload.change_type == "time":
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "compute request has not started reporting",
@@ -386,8 +397,13 @@ def create_compute_request_change(
     if existing is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "a change request is already pending")
     before_value, after_value = change_values(request, payload)
-    validate_change_capacity(
-        payload.change_type, after_value, resource, status.HTTP_422_UNPROCESSABLE_CONTENT
+    validate_change_target(
+        request,
+        resource,
+        payload.change_type,
+        after_value,
+        payload.days_delta,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
     )
     if before_value == after_value:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "allocation is unchanged")
@@ -397,7 +413,7 @@ def create_compute_request_change(
         request_id=request.id,
         requester_id=auth.user.id,
         change_type=payload.change_type,
-        amount=payload.amount,
+        days_delta=payload.days_delta,
         approval_status="pending",
         before_value=before_value,
         after_value=after_value,
@@ -411,8 +427,10 @@ def create_compute_request_change(
         template="compute_change_pending_admin",
         payload={
             "applicant_name": applicant.full_name,
-            "change_type": change.change_type,
-            "amount": change.amount,
+            "change_type": "时间调整" if change.change_type == "time" else "配置调整",
+            "days_delta": change.days_delta,
+            "before_value": change.before_value,
+            "after_value": change.after_value,
         },
     )
     record_audit(
@@ -421,7 +439,12 @@ def create_compute_request_change(
         "compute_change.create",
         "compute_request_change",
         change.id,
-        after={"type": change.change_type, "amount": change.amount},
+        after={
+            "type": change.change_type,
+            "days_delta": change.days_delta,
+            "before_value": change.before_value,
+            "after_value": change.after_value,
+        },
     )
     try:
         db.commit()
@@ -488,15 +511,23 @@ def review_compute_request_change(
     now = utcnow()
     if payload.decision == "approved":
         validate_request_relations(db, applicant, project, resource)
-        validate_change_capacity(
-            change.change_type, change.after_value, resource, status.HTTP_409_CONFLICT
+        validate_change_target(
+            request,
+            resource,
+            change.change_type,
+            change.after_value,
+            change.days_delta,
+            status.HTTP_409_CONFLICT,
         )
-        if change.change_type == "extend":
-            request.duration_days = change.after_value
+        if change.change_type == "time":
+            request.duration_days = change.after_value["duration_days"]
             if request.expires_at is not None:
-                request.expires_at = as_utc(request.expires_at) + timedelta(days=change.amount)
+                request.expires_at = as_utc(request.expires_at) + timedelta(
+                    days=change.days_delta or 0
+                )
         else:
-            setattr(request, CHANGE_FIELDS[change.change_type], change.after_value)
+            for field in CONFIG_FIELDS:
+                setattr(request, field, change.after_value[field])
         request.updated_at = now
     change.approval_status = payload.decision
     change.reviewer_id = auth.user.id
