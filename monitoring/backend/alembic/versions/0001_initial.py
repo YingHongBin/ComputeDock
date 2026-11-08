@@ -89,6 +89,7 @@ CREATE TABLE projects (
 CREATE TABLE compute_resources (
     id uuid PRIMARY KEY,
     name varchar(200) NOT NULL UNIQUE,
+    description text NOT NULL DEFAULT '',
     gpu_model varchar(200) NOT NULL,
     default_cpu_cores integer NOT NULL,
     default_memory_gib integer NOT NULL,

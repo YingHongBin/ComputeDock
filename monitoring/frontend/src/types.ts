@@ -8,6 +8,7 @@ export interface AdminSession {
 }
 
 export interface ResourceCardData {
+  description: string
   id: string
   name: string
   gpu_model: string
@@ -30,6 +31,7 @@ export interface ResourceCardData {
 }
 
 export interface ResourceInput {
+  description?: string
   name: string
   gpu_model: string
   default_cpu_cores: number

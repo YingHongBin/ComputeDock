@@ -330,6 +330,7 @@ class HistoryContainerChart(BaseModel):
 
 
 class ResourceInput(BaseModel):
+    description: str = Field(default="", max_length=4000)
     name: str = Field(min_length=1, max_length=200)
     gpu_model: str = Field(min_length=1, max_length=200)
     gpu_count: int = Field(gt=0, le=10000)
@@ -356,6 +357,7 @@ class ResourceInput(BaseModel):
 
 
 class ResourceCard(BaseModel):
+    description: str
     id: uuid.UUID
     name: str
     gpu_model: str

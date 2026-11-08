@@ -89,6 +89,7 @@ def create_resource(
     resource = ComputeResource(
         id=uuid.uuid4(),
         name=payload.name,
+        description=payload.description,
         gpu_model=payload.gpu_model,
         gpu_count=payload.gpu_count,
         cpu_cores=payload.cpu_cores,
@@ -107,6 +108,7 @@ def create_resource(
         resource.id,
         after={
             "name": resource.name,
+            "description": resource.description,
             "gpu_model": resource.gpu_model,
             "gpu_count": resource.gpu_count,
             "cpu_cores": resource.cpu_cores,
@@ -145,6 +147,7 @@ def update_resource(
     resource = resource_record(db, resource_id)
     before = {
         "name": resource.name,
+        "description": resource.description,
         "gpu_model": resource.gpu_model,
         "gpu_count": resource.gpu_count,
         "cpu_cores": resource.cpu_cores,
@@ -153,6 +156,7 @@ def update_resource(
         "default_memory_gib": resource.default_memory_gib,
     }
     resource.name = payload.name
+    resource.description = payload.description
     resource.gpu_model = payload.gpu_model
     resource.gpu_count = payload.gpu_count
     resource.cpu_cores = payload.cpu_cores
@@ -169,6 +173,7 @@ def update_resource(
         before=before,
         after={
             "name": resource.name,
+            "description": resource.description,
             "gpu_model": resource.gpu_model,
             "gpu_count": resource.gpu_count,
             "cpu_cores": resource.cpu_cores,

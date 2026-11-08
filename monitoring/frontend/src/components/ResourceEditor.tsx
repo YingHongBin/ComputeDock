@@ -18,6 +18,7 @@ export function ResourceEditor({ open, resource, submitting, onCancel, onSubmit 
     if (resource) {
       form.setFieldsValue({
         name: resource.name,
+        description: resource.description,
         gpu_model: resource.gpu_model,
         gpu_count: resource.gpu_count,
         cpu_cores: resource.cpu_cores,
@@ -68,6 +69,9 @@ export function ResourceEditor({ open, resource, submitting, onCancel, onSubmit 
           ({ getFieldValue }) => ({ validator: (_, value) => value <= getFieldValue('memory_gib') ? Promise.resolve() : Promise.reject(new Error('默认值不能超过内存总容量')) }),
         ]}>
           <InputNumber min={1} precision={0} className="full-width" />
+        </Form.Item>
+        <Form.Item name="description" label="说明" rules={[{ max: 4000 }]}>
+          <Input.TextArea rows={3} maxLength={4000} showCount placeholder="可选：填写使用要求、适用任务或其他说明" />
         </Form.Item>
       </Form>
     </Modal>

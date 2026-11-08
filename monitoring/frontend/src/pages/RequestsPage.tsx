@@ -385,6 +385,9 @@ export function RequestsPage() {
                 requestForm.setFieldsValue({ cpu_cores: resource?.default_cpu_cores, memory_gib: resource?.default_memory_gib })
               }} />
           </Form.Item>
+          {selectedResource?.description?.trim() && <Alert type="info" showIcon style={{ marginBottom: 16 }} title="资源说明" description={
+            <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 200, overflowY: 'auto' }}>{selectedResource.description}</div>
+          } />}
           {selectedResource && <Alert type="info" showIcon style={{ marginBottom: 16 }} title="当前申请剩余额度" description={
             <Space direction="vertical" size={0}>
               <span>GPU：{quotaText(selectedResource.gpu_count, selectedResource.reserved_gpu_count, '张')}</span>

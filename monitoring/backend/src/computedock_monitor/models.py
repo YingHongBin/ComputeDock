@@ -125,6 +125,8 @@ class Project(Base):
 class ComputeResource(Base):
     __tablename__ = "compute_resources"
 
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     gpu_model: Mapped[str] = mapped_column(String(200), nullable=False)

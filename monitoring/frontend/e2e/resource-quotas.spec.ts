@@ -2,14 +2,14 @@ import { expect, test } from '@playwright/test'
 
 const resources = [
   {
-    id: 'resource-a', name: 'A100 服务器', gpu_model: 'A100', gpu_count: 4,
+    id: 'resource-a', description: '仅用于训练\n请提前联系管理员 <b>重要</b>', name: 'A100 服务器', gpu_model: 'A100', gpu_count: 4,
     cpu_cores: 32, memory_gib: 128, default_cpu_cores: 8, default_memory_gib: 32,
     allocated_gpu_count: 0, available_gpu_count: 4, overallocated: false, status: 'active',
     reserved_gpu_count: 3, reserved_cpu_cores: 28, reserved_memory_gib: 112,
     remaining_gpu_count: 1, remaining_cpu_cores: 4, remaining_memory_gib: 16,
   },
   {
-    id: 'resource-b', name: 'H100 服务器', gpu_model: 'H100', gpu_count: 8,
+    id: 'resource-b', description: '', name: 'H100 服务器', gpu_model: 'H100', gpu_count: 8,
     cpu_cores: 64, memory_gib: 256, default_cpu_cores: 16, default_memory_gib: 64,
     allocated_gpu_count: 0, available_gpu_count: 8, overallocated: false, status: 'active',
     reserved_gpu_count: 9, reserved_cpu_cores: 72, reserved_memory_gib: 300,
@@ -37,6 +37,7 @@ test('服务器必填容量与默认申请值，默认值不能超过容量', as
   await page.getByRole('button', { name: '新建算力资源' }).click()
   const dialog = page.getByRole('dialog')
   await dialog.getByLabel('资源名称').fill('新服务器')
+  await dialog.getByLabel('说明', { exact: true }).fill('多行说明\n仅供训练使用')
   await dialog.getByLabel('GPU 型号').fill('A100')
   await dialog.getByLabel('GPU 总卡数').fill('4')
   await dialog.getByLabel('CPU 总核心数（逻辑核心）').fill('32')
@@ -48,7 +49,7 @@ test('服务器必填容量与默认申请值，默认值不能超过容量', as
   await dialog.getByLabel('默认申请 CPU 核心数').fill('8')
   const submitted = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/resources'))
   await dialog.getByRole('button', { name: /保\s*存/ }).click()
-  expect((await submitted).postDataJSON()).toMatchObject({ cpu_cores: 32, memory_gib: 128, default_cpu_cores: 8, default_memory_gib: 32 })
+  expect((await submitted).postDataJSON()).toMatchObject({ description: '多行说明\n仅供训练使用', cpu_cores: 32, memory_gib: 128, default_cpu_cores: 8, default_memory_gib: 32 })
 })
 
 test('申请自动填入默认值，显示超配并允许超过剩余额度提交', async ({ page }) => {
@@ -61,12 +62,15 @@ test('申请自动填入默认值，显示超配并允许超过剩余额度提�
   await page.locator('.ant-select-item-option-content').getByText('Research', { exact: true }).click()
   await dialog.getByLabel('算力资源', { exact: true }).click()
   await page.locator('.ant-select-item-option-content').filter({ hasText: 'A100 服务器' }).click()
+  await expect(dialog.getByText('资源说明', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('仅用于训练\n请提前联系管理员 <b>重要</b>', { exact: true })).toBeVisible()
   await expect(dialog.getByLabel('需要 CPU 核心数（逻辑核心）')).toHaveValue('8')
   await expect(dialog.getByLabel('需要内存（GiB）')).toHaveValue('32')
   await expect(dialog.getByText('CPU：剩余 4 核 / 总计 32 核')).toBeVisible()
   await dialog.getByLabel('需要 CPU 核心数（逻辑核心）').fill('12')
   await dialog.getByLabel('算力资源', { exact: true }).click()
   await page.locator('.ant-select-item-option-content').filter({ hasText: 'H100 服务器' }).click()
+  await expect(dialog.getByText('资源说明', { exact: true })).toHaveCount(0)
   await expect(dialog.getByLabel('需要 CPU 核心数（逻辑核心）')).toHaveValue('16')
   await expect(dialog.getByLabel('需要内存（GiB）')).toHaveValue('64')
   await expect(dialog.getByText('CPU：剩余 0 核 / 总计 64 核，已超配 8 核')).toBeVisible()

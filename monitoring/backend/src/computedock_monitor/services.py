@@ -73,6 +73,7 @@ def resource_card(
     return ResourceCard(
         id=resource.id,
         name=resource.name,
+        description=resource.description or "",
         gpu_model=resource.gpu_model,
         gpu_count=resource.gpu_count,
         cpu_cores=resource.cpu_cores,

@@ -57,6 +57,11 @@ def test_clean_schema_requires_request_owned_containers_and_rollups() -> None:
 def test_clean_schema_is_the_only_migration() -> None:
     versions = sorted(MIGRATION.parent.glob("*.py"))
     assert [path.name for path in versions] == ["0001_initial.py"]
+    schema_sql = run_path(str(MIGRATION))["SCHEMA_SQL"]
+    resource_section = schema_sql.split("CREATE TABLE compute_resources", 1)[1].split(
+        "CREATE TABLE compute_requests", 1
+    )[0]
+    assert "description text NOT NULL DEFAULT ''" in resource_section
 
 
 def test_clean_schema_has_no_check_constraints() -> None:

@@ -347,3 +347,40 @@ def test_zero_gpu_request_reports_heartbeat_and_can_expand_release(context):
         "duration_days": 7,
     }
     assert client.post("/api/v1/compute-requests", json=body, headers=headers).status_code == 422
+
+
+def test_resource_description_is_saved_updated_and_clearable(context):
+    client, sessions, headers, resource, _, _, payload = context
+    assert resource["description"] == ""
+    description = "仅供训练使用\n请先联系管理员 <script>alert(1)</script>"
+    created = client.post(
+        "/api/v1/resources",
+        json={**payload, "name": "documented", "description": description},
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    resource_id = created.json()["id"]
+    url = f"/api/v1/resources/{resource_id}"
+    assert client.get(url).json()["description"] == description
+    assert (
+        next(r for r in client.get("/api/v1/resources").json() if r["id"] == resource_id)[
+            "description"
+        ]
+        == description
+    )
+    updated = client.put(
+        url, json={**payload, "name": "documented", "description": "新说明"}, headers=headers
+    )
+    assert updated.status_code == 200
+    with sessions() as db:
+        assert db.get(ComputeResource, uuid.UUID(resource_id)).description == "新说明"
+    assert (
+        client.put(
+            url, json={**payload, "name": "documented", "description": "x" * 4001}, headers=headers
+        ).status_code
+        == 422
+    )
+    cleared = client.put(
+        url, json={**payload, "name": "documented", "description": ""}, headers=headers
+    )
+    assert cleared.json()["description"] == ""
