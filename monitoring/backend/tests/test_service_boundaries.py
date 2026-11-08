@@ -7,6 +7,8 @@ def route_paths(app) -> set[str]:
 
 
 def test_collector_owns_agent_upload_endpoint() -> None:
+    assert "/api/v1/agent/allocation" in route_paths(collector_app)
+    assert "/api/v1/agent/allocation" not in route_paths(management_app)
     assert "/api/v1/agent/samples" in route_paths(collector_app)
     assert "/api/v1/agent/samples" not in route_paths(management_app)
 

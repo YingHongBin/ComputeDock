@@ -55,6 +55,8 @@ def validate_request_relations(
         raise HTTPException(status.HTTP_409_CONFLICT, "Squad is disabled")
     if resource.disabled_at is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "resource is disabled")
+
+
 def actual_gpu_count(db: Session, request_id: uuid.UUID) -> int:
     containers = list(
         db.scalars(
@@ -103,7 +105,9 @@ def change_view(db: Session, change: ComputeRequestChange) -> ComputeRequestChan
     )
 
 
-def request_view(db: Session, request: ComputeRequest, *, include_token: bool) -> ComputeRequestView:
+def request_view(
+    db: Session, request: ComputeRequest, *, include_token: bool
+) -> ComputeRequestView:
     applicant, project, resource = request_relations(db, request)
     actual = actual_gpu_count(db, request.id)
     changes = list(
@@ -123,6 +127,8 @@ def request_view(db: Session, request: ComputeRequest, *, include_token: bool) -
         resource_id=resource.id,
         resource_name=resource.name,
         gpu_count=request.gpu_count,
+        cpu_cores=request.cpu_cores,
+        memory_gib=request.memory_gib,
         duration_days=request.duration_days,
         approval_status=request.approval_status,  # type: ignore[arg-type]
         runtime_status=runtime_status(request),  # type: ignore[arg-type]
@@ -165,8 +171,7 @@ def list_compute_requests(
         query = query.where(ComputeRequest.approval_status == approval_status)
     requests = list(db.scalars(query.order_by(ComputeRequest.created_at.desc())))
     return [
-        request_view(db, request, include_token=auth.user.role == "admin")
-        for request in requests
+        request_view(db, request, include_token=auth.user.role == "admin") for request in requests
     ]
 
 
@@ -181,11 +186,7 @@ def create_compute_request(
     if project is None or resource is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Squad or resource not found")
     validate_request_relations(db, auth.user, project, resource)
-    if payload.gpu_count > resource.gpu_count:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "requested GPUs exceed resource capacity",
-        )
+    validate_capacity(payload, resource, status.HTTP_422_UNPROCESSABLE_CONTENT)
     now = utcnow()
     request = ComputeRequest(
         id=uuid.uuid4(),
@@ -193,6 +194,8 @@ def create_compute_request(
         project_id=project.id,
         resource_id=resource.id,
         gpu_count=payload.gpu_count,
+        cpu_cores=payload.cpu_cores,
+        memory_gib=payload.memory_gib,
         duration_days=payload.duration_days,
         approval_status="pending",
         created_at=now,
@@ -209,6 +212,8 @@ def create_compute_request(
             "project_id": str(project.id),
             "resource_id": str(resource.id),
             "gpu_count": request.gpu_count,
+            "cpu_cores": request.cpu_cores,
+            "memory_gib": request.memory_gib,
             "duration_days": request.duration_days,
         },
     )
@@ -221,6 +226,8 @@ def create_compute_request(
             "project_name": project.name,
             "resource_name": resource.name,
             "gpu_count": request.gpu_count,
+            "cpu_cores": request.cpu_cores,
+            "memory_gib": request.memory_gib,
             "duration_days": request.duration_days,
         },
     )
@@ -276,8 +283,7 @@ def review_compute_request(
     now = utcnow()
     if payload.decision == "approved":
         validate_request_relations(db, applicant, project, resource)
-        if request.gpu_count > resource.gpu_count:
-            raise HTTPException(status.HTTP_409_CONFLICT, "requested GPUs exceed resource capacity")
+        validate_capacity(request, resource, status.HTTP_409_CONFLICT)
         secret = make_compute_request_token()
         request.token = secret
         request.token_hash = digest_secret(secret)
@@ -307,7 +313,35 @@ def review_compute_request(
     return request_view(db, request, include_token=True)
 
 
+def validate_capacity(
+    request: ComputeRequest | ComputeRequestInput, resource: ComputeResource, status_code: int
+) -> None:
+    for key, label in (("gpu_count", "GPUs"), ("cpu_cores", "CPU cores"), ("memory_gib", "memory")):
+        if getattr(request, key) > getattr(resource, key):
+            raise HTTPException(status_code, f"requested {label} exceed resource capacity")
+
+
+CHANGE_FIELDS = {
+    "expand": "gpu_count",
+    "release": "gpu_count",
+    "cpu": "cpu_cores",
+    "memory": "memory_gib",
+}
+
+
+def validate_change_capacity(
+    change_type: str, after_value: int, resource: ComputeResource, status_code: int
+) -> None:
+    field = CHANGE_FIELDS.get(change_type)
+    if field and (after_value < 1 or after_value > getattr(resource, field)):
+        raise HTTPException(
+            status_code, "changed allocation must be positive and within resource capacity"
+        )
+
+
 def change_values(request: ComputeRequest, payload: ComputeRequestChangeInput) -> tuple[int, int]:
+    if payload.change_type in ("cpu", "memory"):
+        return getattr(request, CHANGE_FIELDS[payload.change_type]), payload.amount
     if payload.change_type == "extend":
         return request.duration_days, request.duration_days + payload.amount
     if payload.change_type == "expand":
@@ -333,7 +367,7 @@ def create_compute_request_change(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "compute request not found")
     if request.approval_status != "approved":
         raise HTTPException(status.HTTP_409_CONFLICT, "compute request is not approved")
-    if request.started_at is None:
+    if request.started_at is None and payload.change_type not in ("cpu", "memory"):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "compute request has not started reporting",
@@ -351,13 +385,11 @@ def create_compute_request_change(
     if existing is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "a change request is already pending")
     before_value, after_value = change_values(request, payload)
-    if payload.change_type == "release" and after_value < 1:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "at least one GPU is required")
-    if payload.change_type == "expand" and after_value > resource.gpu_count:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_CONTENT,
-            "expanded GPUs exceed resource capacity",
-        )
+    validate_change_capacity(
+        payload.change_type, after_value, resource, status.HTTP_422_UNPROCESSABLE_CONTENT
+    )
+    if before_value == after_value:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "allocation is unchanged")
     now = utcnow()
     change = ComputeRequestChange(
         id=uuid.uuid4(),
@@ -394,7 +426,9 @@ def create_compute_request_change(
         db.commit()
     except IntegrityError as exc:
         db.rollback()
-        raise HTTPException(status.HTTP_409_CONFLICT, "a change request is already pending") from exc
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "a change request is already pending"
+        ) from exc
     return change_view(db, change)
 
 
@@ -453,14 +487,15 @@ def review_compute_request_change(
     now = utcnow()
     if payload.decision == "approved":
         validate_request_relations(db, applicant, project, resource)
-        if change.change_type == "expand" and change.after_value > resource.gpu_count:
-            raise HTTPException(status.HTTP_409_CONFLICT, "expanded GPUs exceed resource capacity")
+        validate_change_capacity(
+            change.change_type, change.after_value, resource, status.HTTP_409_CONFLICT
+        )
         if change.change_type == "extend":
             request.duration_days = change.after_value
             if request.expires_at is not None:
                 request.expires_at = as_utc(request.expires_at) + timedelta(days=change.amount)
         else:
-            request.gpu_count = change.after_value
+            setattr(request, CHANGE_FIELDS[change.change_type], change.after_value)
         request.updated_at = now
     change.approval_status = payload.decision
     change.reviewer_id = auth.user.id

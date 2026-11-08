@@ -208,6 +208,7 @@ class ProjectInput(BaseModel):
     def strip_description(cls, value: str) -> str:
         return value.strip()
 
+
 class ProjectView(BaseModel):
     id: uuid.UUID
     name: str
@@ -220,12 +221,15 @@ class ComputeRequestInput(BaseModel):
     project_id: uuid.UUID
     resource_id: uuid.UUID
     gpu_count: int = Field(gt=0)
+    cpu_cores: int = Field(gt=0, le=100000, strict=True)
+    memory_gib: int = Field(gt=0, le=1048576, strict=True)
     duration_days: int = Field(ge=1, le=14)
 
 
 class ComputeRequestChangeInput(BaseModel):
-    change_type: Literal["extend", "expand", "release"]
-    amount: int = Field(gt=0)
+    change_type: Literal["extend", "expand", "release", "cpu", "memory"]
+    # CPU/memory amounts are absolute targets; GPU/day amounts are increments.
+    amount: int = Field(gt=0, strict=True)
 
     @model_validator(mode="after")
     def validate_extension_days(self):
@@ -236,7 +240,7 @@ class ComputeRequestChangeInput(BaseModel):
 
 class ComputeRequestChangeView(BaseModel):
     id: uuid.UUID
-    change_type: Literal["extend", "expand", "release"]
+    change_type: Literal["extend", "expand", "release", "cpu", "memory"]
     amount: int
     approval_status: Literal["pending", "approved", "rejected"]
     before_value: int
@@ -257,6 +261,8 @@ class ComputeRequestView(BaseModel):
     resource_id: uuid.UUID
     resource_name: str
     gpu_count: int
+    cpu_cores: int
+    memory_gib: int
     duration_days: int
     approval_status: Literal["pending", "approved", "rejected"]
     runtime_status: Literal["not_started", "running", "expiring", "expired"] | None
@@ -327,6 +333,18 @@ class ResourceInput(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     gpu_model: str = Field(min_length=1, max_length=200)
     gpu_count: int = Field(gt=0, le=10000)
+    cpu_cores: int = Field(gt=0, le=100000, strict=True)
+    memory_gib: int = Field(gt=0, le=1048576, strict=True)
+    default_cpu_cores: int = Field(gt=0, le=100000, strict=True)
+    default_memory_gib: int = Field(gt=0, le=1048576, strict=True)
+
+    @model_validator(mode="after")
+    def validate_defaults(self):
+        if self.default_cpu_cores > self.cpu_cores:
+            raise ValueError("default CPU cores exceed resource capacity")
+        if self.default_memory_gib > self.memory_gib:
+            raise ValueError("default memory exceeds resource capacity")
+        return self
 
     @field_validator("name", "gpu_model")
     @classmethod
@@ -342,6 +360,16 @@ class ResourceCard(BaseModel):
     name: str
     gpu_model: str
     gpu_count: int
+    cpu_cores: int
+    memory_gib: int
+    default_cpu_cores: int
+    default_memory_gib: int
+    reserved_gpu_count: int
+    reserved_cpu_cores: int
+    reserved_memory_gib: int
+    remaining_gpu_count: int
+    remaining_cpu_cores: int
+    remaining_memory_gib: int
     allocated_gpu_count: int
     available_gpu_count: int
     overallocated: bool
@@ -350,6 +378,16 @@ class ResourceCard(BaseModel):
 
 class ResourceDetail(ResourceCard):
     created_at: datetime
+
+
+class AgentAllocation(BaseModel):
+    request_id: uuid.UUID
+    resource_name: str
+    gpu_model: str
+    gpu_count: int
+    cpu_cores: int
+    memory_gib: int
+    expires_at: datetime | None
 
 
 class GpuMetricInput(BaseModel):

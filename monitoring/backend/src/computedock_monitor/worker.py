@@ -121,6 +121,8 @@ def render_notification(notification: NotificationOutbox) -> tuple[str, str]:
             ("project_name", "Squad"),
             ("resource_name", "算力资源"),
             ("gpu_count", "GPU 数量"),
+            ("cpu_cores", "CPU 核心数"),
+            ("memory_gib", "内存（GiB）"),
             ("duration_days", "使用天数"),
             ("change_type", "变更类型"),
             ("amount", "变更数量"),

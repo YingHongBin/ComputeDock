@@ -41,7 +41,15 @@ def card_for(db: Session, resource: ComputeResource) -> ResourceCard:
             )
         )
     )
-    return resource_card(resource, containers)
+    requests = list(
+        db.scalars(
+            select(ComputeRequest).where(
+                ComputeRequest.resource_id == resource.id,
+                ComputeRequest.approval_status == "approved",
+            )
+        )
+    )
+    return resource_card(resource, containers, requests)
 
 
 @router.get("", response_model=list[ResourceCard])
@@ -58,7 +66,17 @@ def list_resources(
     by_resource: dict[uuid.UUID, list[ContainerInstance]] = {}
     for container in containers:
         by_resource.setdefault(container.resource_id, []).append(container)
-    return [resource_card(item, by_resource.get(item.id, [])) for item in resources]
+    requests_by_resource: dict[uuid.UUID, list[ComputeRequest]] = {}
+    for request in db.scalars(
+        select(ComputeRequest).where(
+            ComputeRequest.approval_status == "approved",
+        )
+    ):
+        requests_by_resource.setdefault(request.resource_id, []).append(request)
+    return [
+        resource_card(item, by_resource.get(item.id, []), requests_by_resource.get(item.id, []))
+        for item in resources
+    ]
 
 
 @router.post("", response_model=ResourceDetail, status_code=status.HTTP_201_CREATED)
@@ -73,6 +91,10 @@ def create_resource(
         name=payload.name,
         gpu_model=payload.gpu_model,
         gpu_count=payload.gpu_count,
+        cpu_cores=payload.cpu_cores,
+        memory_gib=payload.memory_gib,
+        default_cpu_cores=payload.default_cpu_cores,
+        default_memory_gib=payload.default_memory_gib,
         created_at=now,
         updated_at=now,
     )
@@ -87,6 +109,10 @@ def create_resource(
             "name": resource.name,
             "gpu_model": resource.gpu_model,
             "gpu_count": resource.gpu_count,
+            "cpu_cores": resource.cpu_cores,
+            "memory_gib": resource.memory_gib,
+            "default_cpu_cores": resource.default_cpu_cores,
+            "default_memory_gib": resource.default_memory_gib,
         },
     )
     try:
@@ -121,10 +147,18 @@ def update_resource(
         "name": resource.name,
         "gpu_model": resource.gpu_model,
         "gpu_count": resource.gpu_count,
+        "cpu_cores": resource.cpu_cores,
+        "memory_gib": resource.memory_gib,
+        "default_cpu_cores": resource.default_cpu_cores,
+        "default_memory_gib": resource.default_memory_gib,
     }
     resource.name = payload.name
     resource.gpu_model = payload.gpu_model
     resource.gpu_count = payload.gpu_count
+    resource.cpu_cores = payload.cpu_cores
+    resource.memory_gib = payload.memory_gib
+    resource.default_cpu_cores = payload.default_cpu_cores
+    resource.default_memory_gib = payload.default_memory_gib
     resource.updated_at = utcnow()
     record_audit(
         db,
@@ -137,6 +171,10 @@ def update_resource(
             "name": resource.name,
             "gpu_model": resource.gpu_model,
             "gpu_count": resource.gpu_count,
+            "cpu_cores": resource.cpu_cores,
+            "memory_gib": resource.memory_gib,
+            "default_cpu_cores": resource.default_cpu_cores,
+            "default_memory_gib": resource.default_memory_gib,
         },
     )
     try:

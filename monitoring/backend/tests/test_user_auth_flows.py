@@ -32,6 +32,7 @@ from computedock_monitor.models import (
     WorkerCheckpoint,
 )
 from computedock_monitor.routers import (
+    agent,
     auth,
     compute_requests,
     history,
@@ -90,6 +91,7 @@ def make_test_app(monkeypatch) -> tuple[TestClient, sessionmaker[Session]]:
         public_base_url="https://monitor.example.test",
     )
     app = FastAPI()
+    app.include_router(agent.router)
     app.include_router(auth.router)
     app.include_router(users.router)
     app.include_router(projects.router)
@@ -354,10 +356,13 @@ def test_all_active_users_can_see_active_squads(monkeypatch) -> None:
     )
     assert second.status_code == 201, second.text
     assert "code" not in second.json()
-    assert client.post(
-        f"/api/v1/projects/{second.json()['id']}/disable",
-        headers={"X-CSRF-Token": csrf},
-    ).status_code == 200
+    assert (
+        client.post(
+            f"/api/v1/projects/{second.json()['id']}/disable",
+            headers={"X-CSRF-Token": csrf},
+        ).status_code
+        == 200
+    )
     client.cookies.clear()
     login(client, user.username, "long-enough-user-password")
     visible = client.get("/api/v1/projects", params={"include_disabled": True})
@@ -504,6 +509,10 @@ def test_low_utilization_warnings_group_containers_by_request(monkeypatch) -> No
         updated_at=window_start,
     )
     resource = ComputeResource(
+        cpu_cores=64,
+        memory_gib=256,
+        default_cpu_cores=8,
+        default_memory_gib=32,
         id=uuid.uuid4(),
         name="Low Usage Cluster",
         gpu_model="H100",
@@ -521,6 +530,8 @@ def test_low_utilization_warnings_group_containers_by_request(monkeypatch) -> No
         updated_at=window_start,
     )
     request = ComputeRequest(
+        cpu_cores=8,
+        memory_gib=32,
         id=uuid.uuid4(),
         applicant_id=applicant.id,
         project_id=project.id,
@@ -531,11 +542,27 @@ def test_low_utilization_warnings_group_containers_by_request(monkeypatch) -> No
         created_at=window_start,
         updated_at=window_start,
     )
+    requests = [request] + [
+        ComputeRequest(
+            id=uuid.uuid4(),
+            applicant_id=applicant.id,
+            project_id=project.id,
+            resource_id=resource.id,
+            gpu_count=4,
+            cpu_cores=8,
+            memory_gib=32,
+            duration_days=7,
+            approval_status="approved",
+            created_at=window_start,
+            updated_at=window_start,
+        )
+        for _ in container_specs[1:]
+    ]
     containers = [
         ContainerInstance(
             id=uuid.uuid4(),
             resource_id=resource.id,
-            compute_request_id=request.id,
+            compute_request_id=application.id,
             name=name,
             generation=1,
             first_reported_at=first_reported,
@@ -543,10 +570,12 @@ def test_low_utilization_warnings_group_containers_by_request(monkeypatch) -> No
             latest_collected_at=last_reported,
             current_gpu_ids=["GPU-1", "GPU-2"],
         )
-        for name, _utilization, last_reported in container_specs
+        for application, (name, _utilization, last_reported) in zip(
+            requests, container_specs, strict=True
+        )
     ]
     with sessions() as db:
-        db.add_all([applicant, resource, project, request, *containers])
+        db.add_all([applicant, resource, project, *requests, *containers])
         db.flush()
         rollup_id = 1
         for container, (_name, utilization, last_reported) in zip(
@@ -558,7 +587,7 @@ def test_low_utilization_warnings_group_containers_by_request(monkeypatch) -> No
                         id=rollup_id,
                         bucket_start=window_start,
                         resource_id=resource.id,
-                        compute_request_id=request.id,
+                        compute_request_id=container.compute_request_id,
                         container_id=container.id,
                         gpuid=gpuid,
                         utilization_avg=utilization,
@@ -630,7 +659,7 @@ def test_low_utilization_warnings_group_containers_by_request(monkeypatch) -> No
                 ),
                 threshold=10,
             )
-            == 1
+            == 2
         )
         notices = list(
             db.scalars(
@@ -639,10 +668,12 @@ def test_low_utilization_warnings_group_containers_by_request(monkeypatch) -> No
                 )
             )
         )
-        assert len(notices) == 1
+        assert len(notices) == 2
         assert notices[0].to_address == applicant.email
         assert notices[0].cc_addresses == [admin.email]
-        assert [item["name"] for item in notices[0].payload["containers"]] == [
+        assert sorted(
+            item["name"] for notice in notices for item in notice.payload["containers"]
+        ) == [
             "training-a",
             "training-b",
         ]
@@ -696,6 +727,10 @@ def test_resources_do_not_have_reporting_tokens(monkeypatch) -> None:
         updated_at=now,
     )
     resource = ComputeResource(
+        cpu_cores=64,
+        memory_gib=256,
+        default_cpu_cores=8,
+        default_memory_gib=32,
         id=uuid.uuid4(),
         name="existing",
         gpu_model="A100",
@@ -709,7 +744,15 @@ def test_resources_do_not_have_reporting_tokens(monkeypatch) -> None:
     csrf = login(client, admin.username, "long-enough-admin-password")
     response = client.post(
         "/api/v1/resources",
-        json={"name": "new", "gpu_model": "H100", "gpu_count": 4},
+        json={
+            "cpu_cores": 64,
+            "memory_gib": 256,
+            "default_cpu_cores": 8,
+            "default_memory_gib": 32,
+            "name": "new",
+            "gpu_model": "H100",
+            "gpu_count": 4,
+        },
         headers={"X-CSRF-Token": csrf},
     )
     assert response.status_code == 201
@@ -738,6 +781,10 @@ def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatc
         updated_at=now,
     )
     resource = ComputeResource(
+        cpu_cores=64,
+        memory_gib=256,
+        default_cpu_cores=8,
+        default_memory_gib=32,
         id=uuid.uuid4(),
         name="gpu-cluster",
         gpu_model="H100",
@@ -762,6 +809,8 @@ def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatc
     response = client.post(
         "/api/v1/compute-requests",
         json={
+            "cpu_cores": 8,
+            "memory_gib": 32,
             "project_id": str(project.id),
             "resource_id": str(resource.id),
             "gpu_count": 2,
@@ -815,6 +864,8 @@ def test_compute_request_token_is_admin_only_and_changes_are_reviewed(monkeypatc
     pending_response = client.post(
         "/api/v1/compute-requests",
         json={
+            "cpu_cores": 8,
+            "memory_gib": 32,
             "project_id": str(project.id),
             "resource_id": str(resource.id),
             "gpu_count": 1,
@@ -946,6 +997,10 @@ def test_admin_can_approve_own_compute_request(monkeypatch) -> None:
     admin = seed_admin(sessions)
     now = utcnow()
     resource = ComputeResource(
+        cpu_cores=64,
+        memory_gib=256,
+        default_cpu_cores=8,
+        default_memory_gib=32,
         id=uuid.uuid4(),
         name="self-review-cluster",
         gpu_model="H100",
@@ -970,6 +1025,8 @@ def test_admin_can_approve_own_compute_request(monkeypatch) -> None:
     response = client.post(
         "/api/v1/compute-requests",
         json={
+            "cpu_cores": 8,
+            "memory_gib": 32,
             "project_id": str(project.id),
             "resource_id": str(resource.id),
             "gpu_count": 1,

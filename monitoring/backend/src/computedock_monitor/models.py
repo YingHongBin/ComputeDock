@@ -128,7 +128,11 @@ class ComputeResource(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
     gpu_model: Mapped[str] = mapped_column(String(200), nullable=False)
+    default_cpu_cores: Mapped[int] = mapped_column(Integer, nullable=False)
+    default_memory_gib: Mapped[int] = mapped_column(Integer, nullable=False)
     gpu_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    cpu_cores: Mapped[int] = mapped_column(Integer, nullable=False)
+    memory_gib: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -153,6 +157,8 @@ class ComputeRequest(Base):
         Uuid, ForeignKey("compute_resources.id", ondelete="RESTRICT"), nullable=False
     )
     gpu_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    cpu_cores: Mapped[int] = mapped_column(Integer, nullable=False)
+    memory_gib: Mapped[int] = mapped_column(Integer, nullable=False)
     duration_days: Mapped[int] = mapped_column(Integer, nullable=False)
     approval_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
     reviewer_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -240,9 +246,8 @@ class ContainerInstance(Base):
             unique=True,
         ),
         Index(
-            "uq_container_request_active_name",
+            "uq_container_request_active",
             "compute_request_id",
-            "name",
             unique=True,
             postgresql_where=text("removed_at IS NULL"),
             sqlite_where=text("removed_at IS NULL"),

@@ -163,7 +163,7 @@ export function ResourceDetailPage({ resourceId }: { resourceId: string }) {
       <Flex justify="space-between" align="end" className="page-heading detail-heading">
         <div>
           <Typography.Title level={2}>{resource?.name ?? '算力资源详情'}</Typography.Title>
-          {resource && <Typography.Text type="secondary">{resource.gpu_model} · 总计 {resource.gpu_count} 张 · 已分配 {resource.allocated_gpu_count} 张</Typography.Text>}
+          {resource && <Typography.Text type="secondary">{resource.gpu_model} · CPU {resource.cpu_cores} 核 · 内存 {resource.memory_gib} GiB · 总计 {resource.gpu_count} 张 · 已分配 {resource.allocated_gpu_count} 张</Typography.Text>}
         </div>
         {session?.role === 'admin' && <Space>
           <Button icon={<EditOutlined />} disabled={!resource} onClick={() => setEditorOpen(true)}>

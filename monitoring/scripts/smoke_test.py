@@ -59,7 +59,9 @@ class Client:
         return None if not content else json.loads(content)
 
 
-def sample(container_name: str, collected_at: datetime, utilization: int = 42) -> dict[str, object]:
+def sample(
+    container_name: str, collected_at: datetime, utilization: int = 42
+) -> dict[str, object]:
     return {
         "container_name": container_name,
         "collected_at": collected_at.isoformat().replace("+00:00", "Z"),
@@ -103,7 +105,15 @@ def main() -> int:
     resource = client.request(
         "POST",
         "/api/v1/resources",
-        {"name": f"smoke-{suffix}", "gpu_model": "Mock A100", "gpu_count": 1},
+        {
+            "cpu_cores": 64,
+            "memory_gib": 256,
+            "default_cpu_cores": 8,
+            "default_memory_gib": 32,
+            "name": f"smoke-{suffix}",
+            "gpu_model": "Mock A100",
+            "gpu_count": 1,
+        },
         csrf_headers,
         201,
     )
@@ -114,6 +124,8 @@ def main() -> int:
         "POST",
         "/api/v1/compute-requests",
         {
+            "cpu_cores": 8,
+            "memory_gib": 32,
             "project_id": project["id"],
             "resource_id": resource_id,
             "gpu_count": 1,
@@ -142,19 +154,24 @@ def main() -> int:
     assert isinstance(accepted, dict) and accepted["status"] == "accepted"
     assert isinstance(duplicate, dict) and duplicate["status"] == "duplicate"
     collector.request(
-        "POST", "/api/v1/agent/samples", sample("smoke-worker-1", now, 43), agent_headers, 409
+        "POST",
+        "/api/v1/agent/samples",
+        sample("smoke-worker-1", now, 43),
+        agent_headers,
+        409,
     )
     collector.request(
         "POST",
         "/api/v1/agent/samples",
         sample("smoke-worker-2", now + timedelta(seconds=1), 55),
         agent_headers,
+        409,
     )
 
     current = client.request("GET", f"/api/v1/resources/{resource_id}")
     assert isinstance(current, dict) and current["allocated_gpu_count"] == 1
     containers = client.request("GET", f"/api/v1/resources/{resource_id}/containers")
-    assert isinstance(containers, list) and len(containers) == 2
+    assert isinstance(containers, list) and len(containers) == 1
     worker_1 = next(item for item in containers if item["name"] == "smoke-worker-1")
     chart = client.request(
         "GET",
@@ -162,7 +179,7 @@ def main() -> int:
     )
     assert isinstance(chart, dict)
     assert chart["window_start"] < chart["window_end"]
-    assert chart["series"][0]["shared"] is True
+    assert chart["series"][0]["shared"] is False
     assert len(chart["series"][0]["points"]) == 1
 
     client.request(
@@ -179,12 +196,19 @@ def main() -> int:
     )
     regenerated = client.request("GET", f"/api/v1/resources/{resource_id}/containers")
     assert isinstance(regenerated, list)
-    assert next(item for item in regenerated if item["name"] == "smoke-worker-1")["generation"] == 2
+    assert (
+        next(item for item in regenerated if item["name"] == "smoke-worker-1")[
+            "generation"
+        ]
+        == 2
+    )
 
     pending = client.request(
         "POST",
         "/api/v1/compute-requests",
         {
+            "cpu_cores": 8,
+            "memory_gib": 32,
             "project_id": project["id"],
             "resource_id": resource_id,
             "gpu_count": 1,

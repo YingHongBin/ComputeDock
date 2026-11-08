@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
         help="完整的 Agent 数据上报地址",
     )
     parser.add_argument("--token", required=True, help="已通过算力申请的 Token")
-    parser.add_argument("--containers", type=int, default=2, help="模拟容器数量")
+    parser.add_argument("--containers", type=int, default=1, choices=[1], help="每个申请 Token 仅允许一个模拟容器")
     parser.add_argument("--gpus-per-container", type=int, default=2, help="每个容器 GPU 数量")
     parser.add_argument("--hours", type=float, default=1.0, help="生成最近多少小时，最大 24")
     parser.add_argument("--interval", type=int, default=60, help="样本间隔秒数")
@@ -32,8 +32,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def validate(args: argparse.Namespace) -> None:
-    if args.containers < 1 or args.gpus_per_container < 1:
-        raise ValueError("containers 和 gpus-per-container 必须大于 0")
+    if args.containers != 1 or args.gpus_per_container < 1:
+        raise ValueError("每个申请 Token 仅允许一个容器，gpus-per-container 必须大于 0")
     if not 0 < args.hours <= 24:
         raise ValueError("hours 必须大于 0 且不超过 24")
     if args.interval < 1:

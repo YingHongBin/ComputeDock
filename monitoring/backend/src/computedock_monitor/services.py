@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
@@ -27,7 +28,7 @@ from .schemas import (
     ResourceCard,
     SampleInput,
 )
-from .security import digest_secret, utcnow
+from .security import as_utc, digest_secret, utcnow
 
 RANGES = {
     "1h": (timedelta(hours=1), 60),
@@ -48,7 +49,19 @@ def aligned_chart_window(
 def resource_card(
     resource: ComputeResource,
     containers: list[ContainerInstance],
+    requests: Sequence[ComputeRequest] = (),
 ) -> ResourceCard:
+    now = utcnow()
+    active = [
+        item
+        for item in requests
+        if item.approval_status == "approved"
+        and (item.expires_at is None or as_utc(item.expires_at) > now)
+    ]
+    reserved = {
+        key: sum(getattr(item, key) for item in active)
+        for key in ("gpu_count", "cpu_cores", "memory_gib")
+    }
     allocated = len(
         {
             gpuid
@@ -62,6 +75,15 @@ def resource_card(
         name=resource.name,
         gpu_model=resource.gpu_model,
         gpu_count=resource.gpu_count,
+        cpu_cores=resource.cpu_cores,
+        memory_gib=resource.memory_gib,
+        default_cpu_cores=resource.default_cpu_cores,
+        default_memory_gib=resource.default_memory_gib,
+        **{f"reserved_{key}": value for key, value in reserved.items()},
+        **{
+            f"remaining_{key}": max(getattr(resource, key) - value, 0)
+            for key, value in reserved.items()
+        },
         allocated_gpu_count=allocated,
         available_gpu_count=max(resource.gpu_count - allocated, 0),
         overallocated=allocated > resource.gpu_count,
@@ -144,6 +166,16 @@ def get_or_create_container(
     )
     if container is not None:
         return container
+    existing = db.scalar(
+        select(ContainerInstance).where(
+            ContainerInstance.compute_request_id == request.id,
+            ContainerInstance.removed_at.is_(None),
+        )
+    )
+    if existing is not None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, f"request already has a container: {existing.name}"
+        )
     generation = db.scalar(
         select(func.coalesce(func.max(ContainerInstance.generation), 0)).where(
             *namespace_filters,

@@ -18,6 +18,8 @@ function request(
     resource_id: 'resource-id',
     resource_name: 'Resource',
     gpu_count: 2,
+    cpu_cores: 8,
+    memory_gib: 32,
     duration_days: 7,
     approval_status: approvalStatus,
     runtime_status: null,

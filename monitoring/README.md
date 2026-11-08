@@ -32,12 +32,12 @@
 
 ## 用户、Squad与算力申请
 
-- 普通用户可以查看当前算力资源和容器使用情况、提交算力申请，并对自己已通过且未到期的申请提交延时、扩容或释放部分 GPU 的变更申请。
+- 普通用户可以查看当前算力资源和容器使用情况、提交算力申请，并对自己已通过且未到期的申请提交延时、扩容、释放部分 GPU 或独立调整 CPU/内存的变更申请。
 - 管理员与普通用户使用相同的申请规则，也可以审批自己的申请。只有管理员能审核注册和算力申请、管理用户/Squad、创建或编辑资源、禁用资源、移除容器及查看历史面板。
 - 所有有效用户都能查看并申请所有启用中的Squad；禁用的Squad只在管理员管理页显示，且不能用于新申请。
-- 初始使用天数和单次延时均为 1–14 天的正整数。GPU 数量只校验不超过资源总卡数，不做并发预留或总申请量限制。
+- 初始使用天数和单次延时均为 1–14 天的正整数。GPU、CPU、内存只校验单笔不超过服务器总容量，不限制累计申请量；获批额度会参与剩余额度展示。
 - 申请从首个容器首次成功上报开始计时。到期前一天显示提醒标签并向申请人发邮件，同时抄送所有有效管理员；到期后继续接收该 Token 的上报。
-- 禁用用户、Squad或资源只会自动拒绝仍在申请中的请求和变更，不影响已经通过的申请或 Token。资源“删除”统一采用禁用语义，并可重新启用。
+- 禁用用户、Squad或资源只会自动拒绝仍在申请中的请求和变更，已经通过的申请和 Token 仍可供已有容器上报，但新建或重建容器会检查用户、Squad 和服务器是否启用。资源“删除”统一采用禁用语义，并可重新启用。
 
 普通用户不能查看或复制任何 Token。管理员可重复复制已通过申请的 Token；Token 明文保存、不支持重置，也不记录复制行为。算力资源不创建资源级 Token，Agent 只能使用已通过申请的 Token。
 
@@ -53,21 +53,21 @@ computedock-agent run \
   --token 'cda_xxx'
 ```
 
-同一申请中的 GPU UUID 会去重计算实际使用卡数；超过申请卡数时只提示超额，不拒绝数据。多个容器使用同一 UUID 时，各容器曲线仍然独立。容器超过 120 秒没有成功请求会显示失联，但仍计入实际使用，直到管理员移除。移除后同名容器再次上报会创建新的容器代次。
+同一申请中的 GPU UUID 会去重计算实际使用卡数；超过申请卡数时只提示超额，不拒绝数据。不同申请的容器使用同一 UUID 时，各容器曲线仍然独立；同一申请不能同时关联多个未移除容器。容器超过 120 秒没有成功请求会显示失联，但仍计入实际使用，直到管理员移除。移除后同名容器再次上报会创建新的容器代次。
 
 所有容器必须绑定算力申请。页面主要显示Squad名称和申请人姓名，Agent 上传的容器名称作为同一申请内的内部实例标识展示。
 
 ## 反向代理
 
-管理页面使用宿主机 8000 端口，collector 使用 8001 端口。正式部署时由外部 Nginx 终止 HTTPS，将上报地址精确转发到 collector，其余请求转发到 app。生产环境应设置 `COOKIE_SECURE=true`。
+管理页面使用宿主机 8000 端口，collector 使用 8001 端口。正式部署时由外部 Nginx 终止 HTTPS，将 `/api/v1/agent/` 下的上报及额度查询请求转发到 collector，其余请求转发到 app。生产环境应设置 `COOKIE_SECURE=true`。
 
 ```nginx
 location = /monitor {
     return 301 /monitor/;
 }
 
-location = /monitor/api/v1/agent/samples {
-    proxy_pass http://127.0.0.1:8001/api/v1/agent/samples;
+location /monitor/api/v1/agent/ {
+    proxy_pass http://127.0.0.1:8001/api/v1/agent/;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-Proto $scheme;
@@ -144,7 +144,7 @@ worker 按 `BUSINESS_TIMEZONE` 每天 08:00 聚合昨天的数据，聚合结果
 ```shell
 python scripts/mock_data.py \
   --token 'cda_xxx' \
-  --containers 3 \
+  --containers 1 \
   --gpus-per-container 2 \
   --hours 2 \
   --interval 60 \
@@ -187,3 +187,17 @@ cd frontend
 MONITORING_E2E_PASSWORD='change-me-admin' npx playwright install chromium
 MONITORING_E2E_PASSWORD='change-me-admin' npm run test:e2e
 ```
+
+## CPU、内存与申请额度
+
+新建/编辑服务器时必须填写 CPU 逻辑核心数、内存总容量（GiB），以及 CPU、内存的单次申请默认值。所有值为正整数，默认值不能超过服务器总容量。选择服务器后，申请表自动填入这两个默认值，允许申请人修改；GPU 数量和使用天数仍由申请人填写。
+
+提交和审批只检查单笔 GPU、CPU、内存申请是否超过服务器总容量。弹窗中的申请剩余额度按“总容量减去已批准且未到期的申请额度”计算，包含尚未启动的获批申请；待审批、已拒绝、已到期申请不占用额度。超过剩余额度时提示但允许提交，超配时显示剩余 0 及超配数量。资源卡上的 GPU 实际分配量仍来自容器上报，与审批额度分开统计。
+
+CPU 和内存可独立申请调整，输入调整后的总量，审批通过后才更新额度。API 的变更类型 `cpu`、`memory` 使用 `amount` 表示目标总量；`expand`、`release`、`extend` 继续表示 GPU 或天数增减量。尚未启动的申请也可调整 CPU、内存。已有运行容器的限制由管理员同步调整，系统不会自动执行 Docker 更新。
+
+`GET /api/v1/agent/allocation` 使用申请 Token 的 `Authorization: Bearer ...` 认证，返回申请 ID、服务器名称、GPU 型号及获批的 GPU/CPU/内存容量。查询不启动使用期限；无效 Token、已到期申请、已禁用关联对象或仍有未移除容器的申请不能用于创建。此接口由 collector 提供，反向代理需要按上面的 `/api/v1/agent/` 路径转发。
+
+一份申请只允许关联一个未移除容器，停止或失联不视为删除。重建前需删除宿主机旧容器，并在监控页面移除旧容器记录；重建沿用原申请期限。首次成功上报仍是申请开始计时的时点。
+
+本次直接更新全新部署使用的 `0001_initial` 数据库定义，不提供历史数据库迁移、补录或默认值回填；已有数据库不能仅通过重复执行 `alembic upgrade head` 获得这些新增字段。

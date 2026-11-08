@@ -11,9 +11,19 @@ export interface ResourceCardData {
   id: string
   name: string
   gpu_model: string
+  default_cpu_cores: number
+  default_memory_gib: number
   gpu_count: number
+  cpu_cores: number
+  memory_gib: number
   allocated_gpu_count: number
   available_gpu_count: number
+  reserved_gpu_count: number
+  reserved_cpu_cores: number
+  reserved_memory_gib: number
+  remaining_gpu_count: number
+  remaining_cpu_cores: number
+  remaining_memory_gib: number
   overallocated: boolean
   status: 'active' | 'disabled'
   created_at?: string
@@ -22,7 +32,11 @@ export interface ResourceCardData {
 export interface ResourceInput {
   name: string
   gpu_model: string
+  default_cpu_cores: number
+  default_memory_gib: number
   gpu_count: number
+  cpu_cores: number
+  memory_gib: number
 }
 
 export interface ContainerSummary {
@@ -139,7 +153,7 @@ export interface ProjectData {
 
 export interface ComputeRequestChangeData {
   id: string
-  change_type: 'extend' | 'expand' | 'release'
+  change_type: 'extend' | 'expand' | 'release' | 'cpu' | 'memory'
   amount: number
   approval_status: 'pending' | 'approved' | 'rejected'
   before_value: number
@@ -160,6 +174,8 @@ export interface ComputeRequestData {
   resource_id: string
   resource_name: string
   gpu_count: number
+  cpu_cores: number
+  memory_gib: number
   duration_days: number
   approval_status: 'pending' | 'approved' | 'rejected'
   runtime_status: 'not_started' | 'running' | 'expiring' | 'expired' | null

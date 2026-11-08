@@ -19,7 +19,16 @@ from computedock_monitor.services import (
 
 
 def test_resource_allocation_deduplicates_shared_gpu() -> None:
-    resource = ComputeResource(id=uuid.uuid4(), name="r", gpu_model="A100", gpu_count=2)
+    resource = ComputeResource(
+        cpu_cores=64,
+        memory_gib=256,
+        default_cpu_cores=8,
+        default_memory_gib=32,
+        id=uuid.uuid4(),
+        name="r",
+        gpu_model="A100",
+        gpu_count=2,
+    )
     containers = [
         ContainerInstance(current_gpu_ids=["GPU-1", "GPU-2"], removed_at=None),
         ContainerInstance(current_gpu_ids=["GPU-1"], removed_at=None),
@@ -31,7 +40,16 @@ def test_resource_allocation_deduplicates_shared_gpu() -> None:
 
 
 def test_resource_allocation_marks_overallocation() -> None:
-    resource = ComputeResource(id=uuid.uuid4(), name="r", gpu_model="A100", gpu_count=1)
+    resource = ComputeResource(
+        cpu_cores=64,
+        memory_gib=256,
+        default_cpu_cores=8,
+        default_memory_gib=32,
+        id=uuid.uuid4(),
+        name="r",
+        gpu_model="A100",
+        gpu_count=1,
+    )
     card = resource_card(
         resource,
         [ContainerInstance(current_gpu_ids=["GPU-1", "GPU-2"], removed_at=None)],
@@ -82,7 +100,7 @@ def test_chart_window_aligns_to_bucket_boundaries() -> None:
 
 
 def test_compute_request_starts_once_from_first_received_report() -> None:
-    request = ComputeRequest(duration_days=7)
+    request = ComputeRequest(cpu_cores=8, memory_gib=32, duration_days=7)
     first = datetime(2026, 8, 10, 1, 2, 3, tzinfo=UTC)
     second = first + timedelta(hours=1)
     assert start_compute_request(request, first)

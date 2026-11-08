@@ -90,7 +90,11 @@ CREATE TABLE compute_resources (
     id uuid PRIMARY KEY,
     name varchar(200) NOT NULL UNIQUE,
     gpu_model varchar(200) NOT NULL,
+    default_cpu_cores integer NOT NULL,
+    default_memory_gib integer NOT NULL,
     gpu_count integer NOT NULL,
+    cpu_cores integer NOT NULL,
+    memory_gib integer NOT NULL,
     disabled_at timestamptz,
     disabled_by_id uuid REFERENCES users(id) ON DELETE RESTRICT,
     created_at timestamptz NOT NULL,
@@ -103,6 +107,8 @@ CREATE TABLE compute_requests (
     project_id uuid NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
     resource_id uuid NOT NULL REFERENCES compute_resources(id) ON DELETE RESTRICT,
     gpu_count integer NOT NULL,
+    cpu_cores integer NOT NULL,
+    memory_gib integer NOT NULL,
     duration_days integer NOT NULL,
     approval_status varchar(20) NOT NULL,
     reviewer_id uuid REFERENCES users(id) ON DELETE RESTRICT,
@@ -165,8 +171,8 @@ CREATE TABLE container_instances (
 );
 CREATE UNIQUE INDEX uq_container_request_generation
     ON container_instances(compute_request_id, name, generation);
-CREATE UNIQUE INDEX uq_container_request_active_name
-    ON container_instances(compute_request_id, name)
+CREATE UNIQUE INDEX uq_container_request_active
+    ON container_instances(compute_request_id)
     WHERE removed_at IS NULL;
 CREATE INDEX ix_container_resource_active
     ON container_instances(resource_id, removed_at);

@@ -544,7 +544,7 @@ prompt_image() {
 
 prompt_agent_server_url() {
     local value
-    printf 'Agent 完整上报地址 [%s]: ' "$AGENT_SERVER_URL_DEFAULT"
+    printf '远程服务地址（可输入服务根地址或完整上报地址）[%s]: ' "$AGENT_SERVER_URL_DEFAULT"
     IFS= read -r value || exit 1
     AGENT_SERVER_URL="${value:-$AGENT_SERVER_URL_DEFAULT}"
 }
@@ -726,7 +726,7 @@ prompt_gpus() {
             (( ${#raw_index} <= 5 )) || invalid="$raw_index"
         done < <(printf '%s\n' "$value" | tr ',' '\n')
         if [[ -n "$invalid" ]]; then
-            warn "GPU 编号过大：$invalid。"
+            warn "GPU 编号过大：${invalid}。"
             continue
         fi
         normalized=$(printf '%s\n' "${value//,/$'\n'}" | awk '{ print $1 + 0 }' | numbers_to_csv)
@@ -1072,28 +1072,225 @@ create_container() {
     fi
 }
 
+# Reporting mode consumes the complete approved allocation, never a server default.
+normalize_agent_url() {
+    AGENT_SERVER_URL=$(python3 -c '
+import sys
+from urllib.parse import urlsplit, urlunsplit
+u = urlsplit(sys.argv[1])
+if u.scheme not in ("http", "https") or not u.hostname or u.username or u.password or u.query or u.fragment:
+    sys.exit("服务地址必须是 http(s) URL，不能包含凭据、查询参数或片段")
+p = u.path.rstrip("/")
+if not p.endswith("/api/v1/agent/samples"):
+    p += "/api/v1/agent/samples"
+print(urlunsplit((u.scheme, u.netloc, p, "", "")))
+' "$AGENT_SERVER_URL") || die "远程服务地址无效。"
+    ALLOCATION_URL="${AGENT_SERVER_URL%/samples}/allocation"
+}
+
+fetch_approved_allocation() {
+    local response code body
+    [[ "$agent_token" =~ ^[A-Za-z0-9_-]+$ ]] || die "Token 格式无效。"
+    # Pass the secret through stdin, not curl's process arguments or a URL.
+    response=$(printf 'header = "Authorization: Bearer %s"\n' "$agent_token" | \
+        curl --config - --silent --show-error --connect-timeout 10 --max-time 30 \
+        --proto '=http,https' --write-out '\n%{http_code}' "$ALLOCATION_URL") \
+        || die "无法连接远程服务；请检查地址和网络后重试。"
+    code=${response##*$'\n'}
+    body=${response%$'\n'*}
+    if [[ "$code" != "200" ]]; then
+        python3 -c 'import json,sys
+try: message=json.load(sys.stdin).get("detail", "服务返回错误")
+except ValueError: message="服务返回了非 JSON 响应"
+print(json.dumps(message, ensure_ascii=False), file=sys.stderr)' <<< "$body"
+        die "查询申请失败（HTTP ${code}），未创建容器。"
+    fi
+    python3 -c 'import json,sys,uuid
+try:
+    d=json.load(sys.stdin)
+    request_id=str(uuid.UUID(d["request_id"]))
+    keys=("gpu_count", "cpu_cores", "memory_gib")
+    for key, limit in zip(keys, (10000,100000,1048576)):
+        if type(d[key]) is not int or not 0 < d[key] <= limit: raise ValueError(key)
+    print("获批服务器：" + json.dumps(d["resource_name"], ensure_ascii=False), file=sys.stderr)
+    print("GPU 型号：" + json.dumps(d["gpu_model"], ensure_ascii=False), file=sys.stderr)
+    print(request_id, *(d[k] for k in keys))
+except (ValueError, KeyError, TypeError):
+    sys.exit("远程服务返回的申请资源数据无效")' <<< "$body" || die "无法读取获批额度。"
+}
+
+check_existing_request_container() {
+    local ids id env_lines name
+    ids=$(docker ps -aq) || die "无法查询已有容器。"
+    while IFS= read -r id; do
+        [[ -n "$id" ]] || continue
+        env_lines=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$id") \
+            || die "无法检查已有容器 ${id}。"
+        if printf '%s\n' "$env_lines" | grep -Fxq -- "COMPUTEDOCK_TOKEN=$agent_token"; then
+            name=$(docker inspect --format '{{.Name}}' "$id")
+            die "此 Token 已用于容器 ${name#/}（包含停止状态）；请启动原容器，或删除旧容器后重建。"
+        fi
+    done <<< "$ids"
+}
+
+load_approved_allocation() {
+    local values
+    values=$(fetch_approved_allocation) || exit 1
+    read -r APPROVED_REQUEST_ID APPROVED_GPU_COUNT APPROVED_CPU_CORES APPROVED_MEMORY_GIB <<< "$values"
+    check_existing_request_container
+    printf '申请额度：GPU %s 张，CPU %s 核，内存 %s GiB\n' \
+        "$APPROVED_GPU_COUNT" "$APPROVED_CPU_CORES" "$APPROVED_MEMORY_GIB"
+    confirm "确认在当前服务器使用这份申请吗？" || die "操作已取消。"
+}
+
+# Unknown or unrestricted bindings are treated as occupied for auto-selection.
+find_free_resources() {
+    local ids id cpus gpus memory cpu gpu used_cpus="" used_gpus="" all_gpus
+    FREE_CPU_CSV=""
+    FREE_GPU_CSV=""
+    RUNNING_MEMORY_BYTES=0
+    MEMORY_ALLOCATION_UNKNOWN=0
+    all_gpus=$(printf '%s\n' "$GPU_DATA" | awk -F, 'NF {gsub(/ /,"",$1); print $1}' | numbers_to_csv)
+    ids=$(docker ps -q) || die "无法查询运行中的容器。"
+    while IFS= read -r id; do
+        [[ -n "$id" ]] || continue
+        cpus=$(docker inspect --format '{{.HostConfig.CpusetCpus}}' "$id") \
+            || die "无法读取容器 CPU 分配。"
+        if [[ -z "$cpus" ]]; then
+            cpus="$ONLINE_CPU_CSV"
+        else
+            cpus=$(expand_number_ranges "$cpus" | numbers_to_csv) || cpus="$ONLINE_CPU_CSV"
+        fi
+        used_cpus="${used_cpus},${cpus}"
+        gpus=$(container_gpu_binding "$id")
+        if [[ "$gpus" != "-" ]]; then
+            [[ "$gpus" =~ ^[0-9]+(,[0-9]+)*$ ]] || gpus="$all_gpus"
+            used_gpus="${used_gpus},${gpus}"
+        fi
+        memory=$(docker inspect --format '{{.HostConfig.Memory}}' "$id") \
+            || die "无法读取容器内存上限。"
+        if [[ "$memory" =~ ^[0-9]+$ ]] && (( memory > 0 )); then
+            RUNNING_MEMORY_BYTES=$((RUNNING_MEMORY_BYTES + memory))
+        else
+            MEMORY_ALLOCATION_UNKNOWN=1
+        fi
+    done <<< "$ids"
+    while IFS= read -r cpu; do
+        case ",$used_cpus," in
+            *",$cpu,"*) ;;
+            *) FREE_CPU_CSV="${FREE_CPU_CSV:+${FREE_CPU_CSV},}${cpu}" ;;
+        esac
+    done < <(expand_number_ranges "$ONLINE_CPU_SPEC")
+    while IFS= read -r gpu; do
+        [[ -n "$gpu" ]] || continue
+        case ",$used_gpus," in
+            *",$gpu,"*) ;;
+            *) FREE_GPU_CSV="${FREE_GPU_CSV:+${FREE_GPU_CSV},}${gpu}" ;;
+        esac
+    done < <(printf '%s\n' "$all_gpus" | tr ',' '\n')
+}
+
+csv_count() {
+    printf '%s\n' "$1" | awk -F, 'NF && $0 != "" {print NF; found=1} END {if (!found) print 0}'
+}
+
+validate_approved_selection() {
+    local cpu_count
+    cpu_count=$(expand_number_ranges "$CPU_SELECTION" | sort -nu | awk 'END {print NR}')
+    [[ "$(csv_count "$GPU_SELECTION")" == "$APPROVED_GPU_COUNT" ]] \
+        && [[ "$cpu_count" == "$APPROVED_CPU_CORES" ]] \
+        && [[ "$MEMORY_GIB" == "$APPROVED_MEMORY_GIB" ]]
+}
+
+prompt_approved_devices() {
+    while true; do
+        prompt_gpus
+        [[ "$(csv_count "$GPU_SELECTION")" == "$APPROVED_GPU_COUNT" ]] && break
+        warn "必须选择获批的 ${APPROVED_GPU_COUNT} 张 GPU；不能改变申请数量。"
+    done
+    while true; do
+        prompt_cpus
+        validate_approved_selection && break
+        warn "必须选择获批的 ${APPROVED_CPU_CORES} 个 CPU 核；不能改变申请数量。"
+    done
+}
+
+check_approved_memory() {
+    local remaining
+    if [[ -z "$HOST_MEM_TOTAL_KIB" ]] || (( MEMORY_ALLOCATION_UNKNOWN )); then
+        warn "无法确定内存可分配量（可能存在未设置内存上限的容器）。获批内存仍为 ${MEMORY_GIB} GiB。"
+        confirm "自行确认内存条件后继续创建吗？" || die "操作已取消。"
+    else
+        remaining=$((HOST_MEM_TOTAL_KIB * 1024 - RUNNING_MEMORY_BYTES))
+        if (( MEMORY_GIB * 1073741824 > remaining )); then
+            warn "内存分配不足：获批 ${MEMORY_GIB} GiB，扣除运行中容器内存上限后的剩余量为 $((remaining / 1073741824)) GiB。"
+            confirm "保持获批内存上限，仍要继续吗？" || die "操作已取消。"
+        fi
+    fi
+}
+
+configure_approved_resources() {
+    local free_gpu_count free_cpu_count
+    MEMORY_GIB="$APPROVED_MEMORY_GIB"
+    SHM_MIB=$((MEMORY_GIB * 512))
+    find_free_resources
+    free_gpu_count=$(csv_count "$FREE_GPU_CSV")
+    free_cpu_count=$(csv_count "$FREE_CPU_CSV")
+    if (( free_gpu_count < APPROVED_GPU_COUNT || free_cpu_count < APPROVED_CPU_CORES )); then
+        warn "空闲资源不足：GPU ${free_gpu_count}/${APPROVED_GPU_COUNT} 张，CPU ${free_cpu_count}/${APPROVED_CPU_CORES} 核（空闲/获批）。"
+        confirm "手动填写 GPU 和 CPU 编号（允许共享已占用资源）吗？" || die "操作已取消。"
+        prompt_approved_devices
+    else
+        GPU_SELECTION=$(printf '%s\n' "$FREE_GPU_CSV" | tr ',' '\n' | awk -v n="$APPROVED_GPU_COUNT" 'NR <= n' | numbers_to_csv)
+        CPU_SELECTION=$(printf '%s\n' "$FREE_CPU_CSV" | tr ',' '\n' | awk -v n="$APPROVED_CPU_CORES" 'NR <= n' | numbers_to_cpu_spec)
+        printf '自动配置：GPU=%s，CPU=%s，内存=%s GiB\n' "$GPU_SELECTION" "$CPU_SELECTION" "$MEMORY_GIB"
+        if ! confirm "接受自动选择的 GPU 和 CPU 编号吗？"; then
+            confirm "改为手动填写编号吗？" || die "操作已取消。"
+            prompt_approved_devices
+        fi
+    fi
+    check_approved_memory
+}
+
+verify_approved_allocation() {
+    local current
+    current=$(fetch_approved_allocation) || exit 1
+    [[ "$current" == "$APPROVED_REQUEST_ID $APPROVED_GPU_COUNT $APPROVED_CPU_CORES $APPROVED_MEMORY_GIB" ]] \
+        || die "申请额度已变更，请重新运行脚本获取最新配置。"
+    check_existing_request_container
+    validate_approved_selection || die "当前资源数量与获批额度不一致。"
+}
+
 main() {
     load_configuration
     require_interactive_terminal
     check_prerequisites
+    prompt_agent_mode
+    if [[ "$AGENT_MODE" == "report" ]]; then
+        command -v curl >/dev/null 2>&1 || die "report 模式需要 curl。"
+        command -v python3 >/dev/null 2>&1 || die "report 模式需要 python3。"
+        prompt_agent_server_url
+        normalize_agent_url
+        prompt_agent_token
+        load_approved_allocation
+    fi
     detect_host_resources
     show_resource_snapshot
 
-    prompt_gpus
-    prompt_cpus
-    prompt_memory
+    if [[ "$AGENT_MODE" == "report" ]]; then
+        configure_approved_resources
+    else
+        prompt_gpus
+        prompt_cpus
+        prompt_memory
+    fi
     prompt_port
     prompt_username
     prompt_password
     prompt_container_name
     prompt_data_root
     prompt_image
-    prompt_agent_mode
     prompt_agent_interval
-    if [[ "$AGENT_MODE" == "report" ]]; then
-        prompt_agent_server_url
-        prompt_agent_token
-    fi
 
     show_configuration
     build_docker_command
@@ -1115,6 +1312,9 @@ main() {
     docker image inspect "$IMAGE_VALUE" >/dev/null 2>&1 || die "镜像 '$IMAGE_VALUE' 在交互期间已不可用。"
 
     confirm "确认创建并启动容器吗？" || die "操作已取消。"
+    if [[ "$AGENT_MODE" == "report" ]]; then
+        verify_approved_allocation
+    fi
     prepare_mount_path
     create_container
 }

@@ -20,6 +20,10 @@ export function ResourceEditor({ open, resource, submitting, onCancel, onSubmit 
         name: resource.name,
         gpu_model: resource.gpu_model,
         gpu_count: resource.gpu_count,
+        cpu_cores: resource.cpu_cores,
+        memory_gib: resource.memory_gib,
+        default_cpu_cores: resource.default_cpu_cores,
+        default_memory_gib: resource.default_memory_gib,
       })
     } else {
       form.resetFields()
@@ -46,6 +50,24 @@ export function ResourceEditor({ open, resource, submitting, onCancel, onSubmit 
         </Form.Item>
         <Form.Item name="gpu_count" label="GPU 总卡数" rules={[{ required: true }]}>
           <InputNumber min={1} max={10000} precision={0} className="full-width" />
+        </Form.Item>
+        <Form.Item name="cpu_cores" label="CPU 总核心数（逻辑核心）" rules={[{ required: true, type: 'integer', min: 1, max: 100000 }]}>
+          <InputNumber min={1} max={100000} precision={0} className="full-width" />
+        </Form.Item>
+        <Form.Item name="memory_gib" label="内存总容量（GiB）" rules={[{ required: true, type: 'integer', min: 1, max: 1048576 }]}>
+          <InputNumber min={1} max={1048576} precision={0} className="full-width" />
+        </Form.Item>
+        <Form.Item name="default_cpu_cores" label="默认申请 CPU 核心数" dependencies={['cpu_cores']} rules={[
+          { required: true, type: 'integer', min: 1 },
+          ({ getFieldValue }) => ({ validator: (_, value) => value <= getFieldValue('cpu_cores') ? Promise.resolve() : Promise.reject(new Error('默认值不能超过 CPU 总核心数')) }),
+        ]}>
+          <InputNumber min={1} precision={0} className="full-width" />
+        </Form.Item>
+        <Form.Item name="default_memory_gib" label="默认申请内存（GiB）" dependencies={['memory_gib']} rules={[
+          { required: true, type: 'integer', min: 1 },
+          ({ getFieldValue }) => ({ validator: (_, value) => value <= getFieldValue('memory_gib') ? Promise.resolve() : Promise.reject(new Error('默认值不能超过内存总容量')) }),
+        ]}>
+          <InputNumber min={1} precision={0} className="full-width" />
         </Form.Item>
       </Form>
     </Modal>

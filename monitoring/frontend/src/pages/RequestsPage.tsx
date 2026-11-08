@@ -1,5 +1,5 @@
 import { CopyOutlined, PlusOutlined } from '@ant-design/icons'
-import { App, Button, Card, Flex, Form, Input, InputNumber, Modal, Select, Space, Table, Tabs, Tag, Tooltip, Typography } from 'antd'
+import { Alert, App, Button, Card, Flex, Form, Input, InputNumber, Modal, Select, Space, Table, Tabs, Tag, Tooltip, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useEffect, useMemo, useState } from 'react'
@@ -20,7 +20,7 @@ const runtimeLabels = {
   expired: ['已到期', 'error'],
 } as const
 
-const changeLabels = { extend: '延时', expand: '扩容', release: '释放' }
+const changeLabels = { extend: '延时', expand: 'GPU 扩容', release: 'GPU 释放', cpu: 'CPU 调整', memory: '内存调整' }
 const pendingTypeLabels = { new: '新申请', ...changeLabels }
 
 type ReviewTarget = { request: ComputeRequestData; change?: ComputeRequestChangeData }
@@ -76,11 +76,21 @@ export function pendingApplications(requests: ComputeRequestData[]): PendingAppl
     .sort((left, right) => dayjs(left.created_at).valueOf() - dayjs(right.created_at).valueOf())
 }
 
+export function quotaText(total: number, reserved: number, unit: string) {
+  const remaining = Math.max(total - reserved, 0)
+  const over = Math.max(reserved - total, 0)
+  return `剩余 ${remaining} ${unit} / 总计 ${total} ${unit}${over ? `，已超配 ${over} ${unit}` : ''}`
+}
+
 function requestContent(request: ComputeRequestData) {
-  return `${request.gpu_count} 张 GPU / ${request.duration_days} 天`
+  return `${request.gpu_count} 张 GPU / ${request.cpu_cores} 核 CPU / ${request.memory_gib} GiB 内存 / ${request.duration_days} 天`
 }
 
 function changeContent(change: ComputeRequestChangeData) {
+  if (change.change_type === 'cpu' || change.change_type === 'memory') {
+    const label = change.change_type === 'cpu' ? 'CPU（核）' : '内存（GiB）'
+    return `${label} ${change.before_value} → ${change.after_value}`
+  }
   if (change.change_type === 'extend') {
     return `使用天数 ${change.before_value} → ${change.after_value}（增加 ${change.amount} 天）`
   }
@@ -107,6 +117,16 @@ export function RequestsPage() {
   const [requestForm] = Form.useForm()
   const [changeForm] = Form.useForm()
   const [reviewForm] = Form.useForm()
+  const selectedResourceId = Form.useWatch('resource_id', requestForm)
+  const requestedGpu = Form.useWatch('gpu_count', requestForm)
+  const requestedCpu = Form.useWatch('cpu_cores', requestForm)
+  const requestedMemory = Form.useWatch('memory_gib', requestForm)
+  const selectedResource = resources.find((item) => item.id === selectedResourceId)
+  const exceedsRemaining = selectedResource && (
+    requestedGpu > selectedResource.remaining_gpu_count ||
+    requestedCpu > selectedResource.remaining_cpu_cores ||
+    requestedMemory > selectedResource.remaining_memory_gib
+  )
 
   const load = async () => {
     setLoading(true)
@@ -139,10 +159,16 @@ export function RequestsPage() {
     setNoticeOpen(true)
   }
 
-  const acceptUsageNotice = () => {
+  const acceptUsageNotice = async () => {
     if (noticeCountdown > 0) return
-    setNoticeOpen(false)
-    setRequestOpen(true)
+    try {
+      const response = await api.get<ResourceCardData[]>('/resources')
+      setResources(response.data)
+      setNoticeOpen(false)
+      setRequestOpen(true)
+    } catch (error) {
+      message.error(errorMessage(error))
+    }
   }
 
   const availableProjects = projects.filter((project) => project.status === 'active')
@@ -227,6 +253,8 @@ export function RequestsPage() {
   const approvedColumns = useMemo<ColumnsType<ComputeRequestData>>(() => [
     ...identityColumns,
     { title: 'GPU', dataIndex: 'gpu_count', width: 80, render: (value, row) => <span>{value} 张{row.over_quota && <Tag color="error" className="inline-tag">超额 {row.actual_gpu_count}</Tag>}</span> },
+    { title: 'CPU（核）', dataIndex: 'cpu_cores', width: 100 },
+    { title: '内存（GiB）', dataIndex: 'memory_gib', width: 110 },
     { title: '使用天数', dataIndex: 'duration_days', width: 100, render: (value) => `${value} 天` },
     { title: '运行', dataIndex: 'runtime_status', width: 110, render: (value: keyof typeof runtimeLabels | null) => value ? <Tag color={runtimeLabels[value][1]}>{runtimeLabels[value][0]}</Tag> : '--' },
     { title: '首次上报时间', dataIndex: 'started_at', width: 170, render: (value) => value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '--' },
@@ -237,7 +265,7 @@ export function RequestsPage() {
           {session?.role === 'admin' && row.token && (
             <Button size="small" icon={<CopyOutlined />} onClick={() => void copyToken(row.token!)}>复制 Token</Button>
           )}
-          {row.applicant_username === session?.username && row.runtime_status !== 'not_started' && row.runtime_status !== 'expired' && !row.changes.some((item) => item.approval_status === 'pending') && (
+          {row.applicant_username === session?.username && row.runtime_status !== 'expired' && !row.changes.some((item) => item.approval_status === 'pending') && (
             <Button size="small" onClick={() => setChangeTarget(row)}>申请变更</Button>
           )}
         </Space>
@@ -248,6 +276,8 @@ export function RequestsPage() {
   const rejectedColumns = useMemo<ColumnsType<ComputeRequestData>>(() => [
     ...identityColumns,
     { title: '申请 GPU 数量', dataIndex: 'gpu_count', width: 120, render: (value) => `${value} 张` },
+    { title: 'CPU（核）', dataIndex: 'cpu_cores', width: 100 },
+    { title: '内存（GiB）', dataIndex: 'memory_gib', width: 110 },
     { title: '申请天数', dataIndex: 'duration_days', width: 100, render: (value) => `${value} 天` },
     { title: '提交时间', dataIndex: 'created_at', width: 170, render: (value) => dayjs(value).format('YYYY-MM-DD HH:mm') },
     { title: '审核人', dataIndex: 'reviewer_name', width: 120, render: (value) => value || '--' },
@@ -274,7 +304,7 @@ export function RequestsPage() {
       <Flex justify="space-between" align="center" className="page-heading">
         <div>
           <Typography.Title level={2}>算力申请</Typography.Title>
-          <Typography.Text type="secondary">申请 GPU 资源，并跟踪延时、扩容和释放审核。</Typography.Text>
+          <Typography.Text type="secondary">申请 GPU、CPU 和内存，并跟踪使用期限与资源调整审批。</Typography.Text>
         </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={showUsageNotice} disabled={!availableProjects.length || !availableResources.length}>新建申请</Button>
       </Flex>
@@ -312,7 +342,7 @@ export function RequestsPage() {
                   {row.changes.map((change) => (
                     <Flex key={change.id} gap={12} align="center" wrap>
                       <Tag>{changeLabels[change.change_type]}</Tag>
-                      <span>{change.before_value} → {change.after_value}</span>
+                      <span>{changeContent(change)}</span>
                       <Tag color={approvalLabels[change.approval_status][1]}>{approvalLabels[change.approval_status][0]}</Tag>
                       {change.review_comment && <Typography.Text type="secondary">{change.review_comment}</Typography.Text>}
                     </Flex>
@@ -326,6 +356,7 @@ export function RequestsPage() {
 
       <Modal
         title="算力资源使用须知"
+        focusTriggerAfterClose={false}
         open={noticeOpen}
         onCancel={() => setNoticeOpen(false)}
         onOk={acceptUsageNotice}
@@ -348,10 +379,29 @@ export function RequestsPage() {
             <Select options={availableProjects.map((item) => ({ value: item.id, label: item.name }))} />
           </Form.Item>
           <Form.Item name="resource_id" label="算力资源" rules={[{ required: true }]}>
-            <Select options={availableResources.map((item) => ({ value: item.id, label: `${item.name} · ${item.gpu_model} · ${item.gpu_count} 张` }))} />
+            <Select options={availableResources.map((item) => ({ value: item.id, label: `${item.name} · ${item.gpu_model} · ${item.gpu_count} 张` }))}
+              onChange={(id) => {
+                const resource = resources.find((item) => item.id === id)
+                requestForm.setFieldsValue({ cpu_cores: resource?.default_cpu_cores, memory_gib: resource?.default_memory_gib })
+              }} />
           </Form.Item>
-          <Form.Item name="gpu_count" label="需要 GPU 数量" rules={[{ required: true }]}>
+          {selectedResource && <Alert type="info" showIcon style={{ marginBottom: 16 }} title="当前申请剩余额度" description={
+            <Space direction="vertical" size={0}>
+              <span>GPU：{quotaText(selectedResource.gpu_count, selectedResource.reserved_gpu_count, '张')}</span>
+              <span>CPU：{quotaText(selectedResource.cpu_cores, selectedResource.reserved_cpu_cores, '核')}</span>
+              <span>内存：{quotaText(selectedResource.memory_gib, selectedResource.reserved_memory_gib, 'GiB')}</span>
+              <span>按已批准且未到期的申请计算，包含尚未启动的申请。</span>
+            </Space>
+          } />}
+          {exceedsRemaining && <Alert type="warning" showIcon title="申请超过当前剩余额度，仍可提交，由管理员审批。" style={{ marginBottom: 16 }} />}
+          <Form.Item name="gpu_count" label="需要 GPU 数量" rules={[{ required: true, type: 'integer', min: 1, max: selectedResource?.gpu_count }]}>
             <InputNumber min={1} precision={0} className="full-width" />
+          </Form.Item>
+          <Form.Item name="cpu_cores" label="需要 CPU 核心数（逻辑核心）" rules={[{ required: true, type: 'integer', min: 1, max: selectedResource?.cpu_cores }]}>
+            <InputNumber min={1} max={selectedResource?.cpu_cores} precision={0} className="full-width" />
+          </Form.Item>
+          <Form.Item name="memory_gib" label="需要内存（GiB）" rules={[{ required: true, type: 'integer', min: 1, max: selectedResource?.memory_gib }]}>
+            <InputNumber min={1} max={selectedResource?.memory_gib} precision={0} className="full-width" />
           </Form.Item>
           <Form.Item
             name="duration_days"
@@ -367,13 +417,16 @@ export function RequestsPage() {
       </Modal>
 
       <Modal title="申请变更" open={!!changeTarget} onCancel={() => setChangeTarget(null)} onOk={() => changeForm.submit()} confirmLoading={busy} destroyOnHidden>
+        {changeTarget && <Typography.Paragraph type="secondary">
+          当前获批：{requestContent(changeTarget)}。CPU、内存填写调整后的总量；审批通过后，已有容器需由管理员同步调整配置。
+        </Typography.Paragraph>}
         <Form form={changeForm} layout="vertical" onFinish={submitChange} preserve={false}>
           <Form.Item name="change_type" label="变更类型" rules={[{ required: true }]}>
-            <Select options={[{ value: 'extend', label: '延时' }, { value: 'expand', label: '扩容' }, { value: 'release', label: '释放部分算力' }]} />
+            <Select options={Object.entries(changeLabels).filter(([value]) => changeTarget?.runtime_status !== 'not_started' || value === 'cpu' || value === 'memory').map(([value, label]) => ({ value, label }))} onChange={() => changeForm.setFieldValue('amount', undefined)} />
           </Form.Item>
           <Form.Item noStyle shouldUpdate={(previous, current) => previous.change_type !== current.change_type}>
             {({ getFieldValue }) => (
-              <Form.Item name="amount" label="增加天数或 GPU 数量" rules={[{ required: true }]}>
+              <Form.Item name="amount" label={getFieldValue('change_type') === 'cpu' ? '调整后的 CPU 总核心数' : getFieldValue('change_type') === 'memory' ? '调整后的内存总量（GiB）' : getFieldValue('change_type') === 'extend' ? '增加天数' : '增加或释放 GPU 张数'} rules={[{ required: true }]}>
                 <InputNumber min={1} max={getFieldValue('change_type') === 'extend' ? 14 : undefined} precision={0} className="full-width" />
               </Form.Item>
             )}

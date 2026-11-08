@@ -66,6 +66,8 @@ def test_compute_request_admin_notice_includes_applicant_details() -> None:
         to_address="admin@example.test",
         cc_addresses=[],
         payload={
+            "cpu_cores": 8,
+            "memory_gib": 32,
             "applicant_name": "GPU Applicant",
             "project_name": "GPU Project",
             "resource_name": "H100 Cluster",
@@ -81,6 +83,8 @@ def test_compute_request_admin_notice_includes_applicant_details() -> None:
     assert "申请人姓名：GPU Applicant" in body
     assert "Squad：GPU Project" in body
     assert "算力资源：H100 Cluster" in body
+    assert "CPU 核心数：8" in body
+    assert "内存（GiB）：32" in body
     assert "GPU 数量：2" in body
     assert "使用天数：7" in body
 
