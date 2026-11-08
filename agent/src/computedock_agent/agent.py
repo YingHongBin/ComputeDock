@@ -99,8 +99,7 @@ class Agent:
         except Exception as exc:
             self._log_exception("nvml_collection", exc)
             return
-        if not metrics:
-            return
+        # Empty GPU metrics still carry the heartbeat for CPU-only containers.
         payload = build_payload(self._container_name, collected_at, metrics)
         try:
             self._reporter.send(payload)

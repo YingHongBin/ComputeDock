@@ -1111,7 +1111,8 @@ try:
     request_id=str(uuid.UUID(d["request_id"]))
     keys=("gpu_count", "cpu_cores", "memory_gib")
     for key, limit in zip(keys, (10000,100000,1048576)):
-        if type(d[key]) is not int or not 0 < d[key] <= limit: raise ValueError(key)
+        minimum = 0 if key == "gpu_count" else 1
+        if type(d[key]) is not int or not minimum <= d[key] <= limit: raise ValueError(key)
     print("获批服务器：" + json.dumps(d["resource_name"], ensure_ascii=False), file=sys.stderr)
     print("GPU 型号：" + json.dumps(d["gpu_model"], ensure_ascii=False), file=sys.stderr)
     print(request_id, *(d[k] for k in keys))

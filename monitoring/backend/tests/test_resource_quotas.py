@@ -295,3 +295,55 @@ def test_database_prevents_two_active_containers(context):
             )
         with pytest.raises(IntegrityError):
             db.flush()
+
+
+def test_zero_gpu_request_reports_heartbeat_and_can_expand_release(context):
+    from computedock_monitor.models import SampleBatch
+
+    client, sessions, headers, _, project, apply, _ = context
+    request = apply(approve=True, gpu_count=0)
+    auth = {"Authorization": "Bearer " + request["token"]}
+    assert client.get("/api/v1/agent/allocation", headers=auth).json()["gpu_count"] == 0
+    assert card(context)["reserved_gpu_count"] == 0
+    assert card(context)["reserved_cpu_cores"] == 24
+    SampleBatch.__table__.create(sessions.kw["bind"])
+    payload = {"container_name": "cpu-worker", "collected_at": utcnow().isoformat(), "gpus": []}
+    response = client.post("/api/v1/agent/samples", json=payload, headers=auth)
+    assert response.status_code == 200, response.text
+    assert (
+        client.post("/api/v1/agent/samples", json=payload, headers=auth).json()["status"]
+        == "duplicate"
+    )
+    url = f"/api/v1/compute-requests/{request['id']}"
+    running = client.get(url).json()
+    assert running["runtime_status"] == "running"
+    payload["collected_at"] = utcnow().isoformat()
+    assert client.post("/api/v1/agent/samples", json=payload, headers=auth).status_code == 200
+    assert client.get(url).json()["expires_at"] == running["expires_at"]
+    for change_type in ("expand", "release"):
+        change = client.post(
+            url + "/changes", json={"change_type": change_type, "amount": 1}, headers=headers
+        )
+        assert change.status_code == 201, change.text
+        reviewed = client.post(
+            url + f"/changes/{change.json()['id']}/review",
+            json={"decision": "approved"},
+            headers=headers,
+        )
+        assert reviewed.status_code == 200, reviewed.text
+    assert client.get(url).json()["gpu_count"] == 0
+    assert (
+        client.post(
+            url + "/changes", json={"change_type": "release", "amount": 1}, headers=headers
+        ).status_code
+        == 422
+    )
+    body = {
+        "project_id": project["id"],
+        "resource_id": request["resource_id"],
+        "gpu_count": -1,
+        "cpu_cores": 8,
+        "memory_gib": 32,
+        "duration_days": 7,
+    }
+    assert client.post("/api/v1/compute-requests", json=body, headers=headers).status_code == 422

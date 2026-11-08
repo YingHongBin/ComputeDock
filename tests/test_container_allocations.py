@@ -17,6 +17,20 @@ class ContainerAllocationTests(unittest.TestCase):
             capture_output=True,
         )
 
+    def test_zero_gpu_approval_uses_only_cpu_and_memory(self):
+        result = self.run_script(r"""
+            APPROVED_GPU_COUNT=0; APPROVED_CPU_CORES=2; APPROVED_MEMORY_GIB=8
+            ONLINE_CPU_SPEC=0-3; ONLINE_CPU_CSV=0,1,2,3
+            GPU_DATA=""; HOST_MEM_TOTAL_KIB=67108864
+            docker() { if [[ "$1" == ps ]]; then return 0; else return 1; fi; }
+            confirm() { return 0; }
+            configure_approved_resources
+            validate_approved_selection || exit 1
+            printf 'RESULT=%s|%s|%s\n' "$GPU_SELECTION" "$CPU_SELECTION" "$MEMORY_GIB"
+        """)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("RESULT=|0-1|8", result.stdout)
+
     def test_service_root_and_full_endpoint_preserve_proxy_prefix(self):
         for url in (
             "https://example.test/monitor",
@@ -44,13 +58,13 @@ class ContainerAllocationTests(unittest.TestCase):
                 case "$*" in *cda_secret*) return 1;; esac
                 IFS= read -r header
                 [[ "$header" == 'header = "Authorization: Bearer cda_secret"' ]] || return 1
-                printf '%s\n200' '{"request_id":"12345678-1234-1234-1234-123456789012","resource_name":"server","gpu_model":"A100","gpu_count":2,"cpu_cores":8,"memory_gib":32}'
+                printf '%s\n200' '{"request_id":"12345678-1234-1234-1234-123456789012","resource_name":"server","gpu_model":"A100","gpu_count":0,"cpu_cores":8,"memory_gib":32}'
             }
             fetch_approved_allocation
         """)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
-            result.stdout.strip(), "12345678-1234-1234-1234-123456789012 2 8 32"
+            result.stdout.strip(), "12345678-1234-1234-1234-123456789012 0 8 32"
         )
         self.assertNotIn("cda_secret", result.stdout + result.stderr)
 

@@ -80,7 +80,7 @@ AGENT_INTERVAL_DEFAULT=15
 
 确认运行模式及申请信息后，脚本会显示宿主机 GPU、CPU、内存的静态容量，以及运行中容器的 GPU/CPU 绑定、内存上限、共享内存和端口映射，不采集实时使用率。端口按 `宿主机端口->容器端口/协议` 展示；没有映射时显示 `-`。第一个交互项为 Agent 运行模式。`test` 模式手动填写 GPU（可留空）、CPU 核和内存；`report` 模式先确认远程服务地址、输入申请 Token，查询并确认获批资源后自动配置。随后填写 SSH 端口、容器用户、密码、容器名、宿主机数据根目录、镜像和采集间隔。Agent 名称自动使用 Docker 容器名。
 
-GPU 留空时，脚本会显式设置 `NVIDIA_VISIBLE_DEVICES=void`，确保 CUDA 基础镜像或 Docker 的 NVIDIA 默认运行时不会让容器看到宿主机 GPU。Agent 仍会正常运行并通过健康检查，但会静默跳过 GPU 采集。修复前以 GPU 留空方式创建的容器不会自动更新，需要删除并重新创建后才能获得该隔离配置。
+GPU 留空时，脚本会显式设置 `NVIDIA_VISIBLE_DEVICES=void`，确保 CUDA 基础镜像或 Docker 的 NVIDIA 默认运行时不会让容器看到宿主机 GPU。Agent 仍会正常运行并通过健康检查，不采集 GPU 指标，但会发送空 GPU 列表的心跳，用于登记容器、开始申请计时及维持在线状态。修复前以 GPU 留空方式创建的容器不会自动更新，需要删除并重新创建后才能获得该隔离配置。
 
 Agent 支持两种容器运行模式：`report` 模式需要宿主机安装 `curl` 和 `python3`，远程服务地址默认为 `https://nbdataxai.com/monitor/api/v1/agent/samples`，也接受服务根地址（例如 `https://nbdataxai.com/monitor`）。脚本通过同一服务的 `/api/v1/agent/allocation` 查询申请 Token，显示获批服务器、GPU 型号、GPU 张数、CPU 逻辑核心数和内存（GiB），确认后选择未被运行中容器占用的 GPU/CPU 编号。无法识别或未限制范围的绑定在自动选择时按占用处理。内存直接使用获批值，共享内存为其一半。
 

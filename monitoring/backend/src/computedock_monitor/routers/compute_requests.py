@@ -333,9 +333,10 @@ def validate_change_capacity(
     change_type: str, after_value: int, resource: ComputeResource, status_code: int
 ) -> None:
     field = CHANGE_FIELDS.get(change_type)
-    if field and (after_value < 1 or after_value > getattr(resource, field)):
+    minimum = 0 if field == "gpu_count" else 1
+    if field and (after_value < minimum or after_value > getattr(resource, field)):
         raise HTTPException(
-            status_code, "changed allocation must be positive and within resource capacity"
+            status_code, "changed allocation is outside the allowed resource range"
         )
 
 

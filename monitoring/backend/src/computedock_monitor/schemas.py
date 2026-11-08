@@ -220,7 +220,7 @@ class ProjectView(BaseModel):
 class ComputeRequestInput(BaseModel):
     project_id: uuid.UUID
     resource_id: uuid.UUID
-    gpu_count: int = Field(gt=0)
+    gpu_count: int = Field(ge=0, strict=True)
     cpu_cores: int = Field(gt=0, le=100000, strict=True)
     memory_gib: int = Field(gt=0, le=1048576, strict=True)
     duration_days: int = Field(ge=1, le=14)
@@ -408,7 +408,7 @@ class GpuMetricInput(BaseModel):
 class SampleInput(BaseModel):
     container_name: str = Field(min_length=1, max_length=255)
     collected_at: datetime
-    gpus: list[GpuMetricInput] = Field(min_length=1, max_length=64)
+    gpus: list[GpuMetricInput] = Field(max_length=64)
 
     @field_validator("container_name")
     @classmethod

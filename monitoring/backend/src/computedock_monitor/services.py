@@ -227,7 +227,7 @@ def ingest_sample(
                 status.HTTP_409_CONFLICT,
                 "different payload already exists for collected_at",
             )
-        container.last_received_at = max(container.last_received_at, received_at)
+        container.last_received_at = max(as_utc(container.last_received_at), received_at)
         db.commit()
         return "duplicate", container
 
@@ -253,9 +253,9 @@ def ingest_sample(
                 utilization=gpu.utilization,
             )
         )
-    container.last_received_at = max(container.last_received_at, received_at)
-    container.first_reported_at = min(container.first_reported_at, collected_at)
-    if collected_at > container.latest_collected_at or not container.current_gpu_ids:
+    container.last_received_at = max(as_utc(container.last_received_at), received_at)
+    container.first_reported_at = min(as_utc(container.first_reported_at), collected_at)
+    if collected_at >= as_utc(container.latest_collected_at):
         container.latest_collected_at = collected_at
         container.current_gpu_ids = sorted(gpu.gpuid for gpu in payload.gpus)
     try:

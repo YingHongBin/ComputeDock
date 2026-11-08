@@ -394,8 +394,8 @@ export function RequestsPage() {
             </Space>
           } />}
           {exceedsRemaining && <Alert type="warning" showIcon title="申请超过当前剩余额度，仍可提交，由管理员审批。" style={{ marginBottom: 16 }} />}
-          <Form.Item name="gpu_count" label="需要 GPU 数量" rules={[{ required: true, type: 'integer', min: 1, max: selectedResource?.gpu_count }]}>
-            <InputNumber min={1} precision={0} className="full-width" />
+          <Form.Item name="gpu_count" label="需要 GPU 数量" extra="填写 0 表示仅申请 CPU 和内存" rules={[{ required: true, type: 'integer', min: 0, max: selectedResource?.gpu_count }]}>
+            <InputNumber min={0} precision={0} className="full-width" />
           </Form.Item>
           <Form.Item name="cpu_cores" label="需要 CPU 核心数（逻辑核心）" rules={[{ required: true, type: 'integer', min: 1, max: selectedResource?.cpu_cores }]}>
             <InputNumber min={1} max={selectedResource?.cpu_cores} precision={0} className="full-width" />

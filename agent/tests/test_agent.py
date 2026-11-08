@@ -92,11 +92,13 @@ class AgentTests(unittest.TestCase):
             },
         )
 
-    def test_empty_gpu_list_is_not_reported_or_logged(self) -> None:
+    def test_empty_gpu_list_reports_heartbeat_without_error_logs(self) -> None:
         logger, stream = test_logger()
         reporter = FakeReporter()
         self.make_agent(FakeCollector([]), reporter, logger).collect_and_report_once()
-        self.assertEqual(reporter.payloads, [])
+        self.assertEqual(len(reporter.payloads), 1)
+        self.assertEqual(reporter.payloads[0]["gpus"], [])
+        self.assertEqual(reporter.payloads[0]["container_name"], "worker")
         self.assertEqual(stream.getvalue(), "")
 
     def test_collection_failure_is_logged_and_not_reported(self) -> None:

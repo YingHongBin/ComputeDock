@@ -61,7 +61,7 @@ COMPUTEDOCK_STATE_DIR
 }
 ```
 
-显存单位为 MiB，利用率为 0–100 的整数。请求超时固定为 10 秒。采集失败、没有可见 GPU 或 HTTP 上报失败时，本周期数据直接丢弃且不会重试；Agent 只把异常写入标准错误，正常周期不产生日志。
+显存单位为 MiB，利用率为 0–100 的整数。请求超时固定为 10 秒。没有可见 GPU 时发送 `gpus: []` 心跳；采集异常或 HTTP 上报失败时，本周期数据直接丢弃且不会重试；Agent 只把异常写入标准错误，正常周期不产生日志。
 
 ## 测试模式
 
@@ -74,7 +74,7 @@ COMPUTEDOCK_STATE_DIR=/tmp/computedock-agent-state computedock-agent run \
     --test-output /tmp/computedock-samples.jsonl
 ```
 
-文件不会被自动清空或轮转。没有可见 GPU 时不会写入空批次。
+文件不会被自动清空或轮转。没有可见 GPU 时仍会写入 `gpus: []` 的心跳批次；远程上报模式也使用此心跳维护纯 CPU 容器的在线状态和申请计时。
 
 Python Agent 不提供默认状态目录或默认测试输出路径。调用方必须通过 `COMPUTEDOCK_STATE_DIR` 指定状态目录；测试模式必须通过 `--test-output` 指定输出文件。Docker 镜像中的目录约定由项目根目录脚本负责传入。
 

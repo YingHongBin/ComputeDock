@@ -23,7 +23,6 @@ def test_accepts_agent_payload() -> None:
 @pytest.mark.parametrize(
     "gpus",
     [
-        [],
         [{"gpuid": "GPU-1", "memory_used": 2, "memory_total": 1, "utilization": 50}],
         [{"gpuid": "GPU-1", "memory_used": 0, "memory_total": 1, "utilization": 101}],
         [
@@ -35,3 +34,7 @@ def test_accepts_agent_payload() -> None:
 def test_rejects_invalid_gpu_batch(gpus) -> None:
     with pytest.raises(ValidationError):
         SampleInput.model_validate(payload(gpus=gpus))
+
+
+def test_accepts_cpu_only_heartbeat() -> None:
+    assert SampleInput.model_validate(payload(gpus=[])).gpus == []

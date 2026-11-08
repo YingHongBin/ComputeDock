@@ -71,11 +71,11 @@ test('申请自动填入默认值，显示超配并允许超过剩余额度提�
   await expect(dialog.getByLabel('需要内存（GiB）')).toHaveValue('64')
   await expect(dialog.getByText('CPU：剩余 0 核 / 总计 64 核，已超配 8 核')).toBeVisible()
   await expect(dialog.getByText('申请超过当前剩余额度，仍可提交，由管理员审批。')).toBeVisible()
-  await dialog.getByLabel('需要 GPU 数量').fill('2')
+  await dialog.getByLabel('需要 GPU 数量').fill('0')
   await dialog.getByLabel('需要天数').fill('7')
   const submitted = page.waitForRequest((r) => r.method() === 'POST' && r.url().endsWith('/compute-requests'))
   await dialog.getByRole('button', { name: /确\s*定/ }).click()
-  expect((await submitted).postDataJSON()).toMatchObject({ resource_id: 'resource-b', gpu_count: 2, cpu_cores: 16, memory_gib: 64, duration_days: 7 })
+  expect((await submitted).postDataJSON()).toMatchObject({ resource_id: 'resource-b', gpu_count: 0, cpu_cores: 16, memory_gib: 64, duration_days: 7 })
 })
 
 test('获批未启动申请可以单独调整 CPU，提交目标总量', async ({ page }) => {
