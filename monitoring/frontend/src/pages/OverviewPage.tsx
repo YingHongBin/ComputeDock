@@ -49,7 +49,7 @@ export function OverviewPage() {
       <Flex justify="space-between" align="center" className="page-heading">
         <div>
           <Typography.Title level={2}>算力资源</Typography.Title>
-          <Typography.Text type="secondary">查看服务器 GPU、CPU、内存容量与 GPU 实际分配情况</Typography.Text>
+          <Typography.Text type="secondary">查看 GPU 容量与当前分配情况</Typography.Text>
         </div>
         {session?.role === 'admin' && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setEditorOpen(true)}>新建算力资源</Button>
@@ -76,7 +76,6 @@ export function OverviewPage() {
                   </Flex>
                 </Flex>
                 <Row gutter={12} className="resource-stats">
-                  <Col span={24}><Typography.Text type="secondary">CPU {resource.cpu_cores} 核 · 内存 {resource.memory_gib} GiB · 默认申请 {resource.default_cpu_cores} 核 / {resource.default_memory_gib} GiB</Typography.Text></Col>
                   <Col span={8}><Statistic title="总卡数" value={resource.gpu_count} /></Col>
                   <Col span={8}><Statistic title="已分配" value={resource.allocated_gpu_count} styles={{ content: resource.overallocated ? { color: '#dc2626' } : {} }} /></Col>
                   <Col span={8}><Statistic title="未分配" value={resource.available_gpu_count} /></Col>
