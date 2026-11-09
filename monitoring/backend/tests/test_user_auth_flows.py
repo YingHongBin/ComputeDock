@@ -218,9 +218,10 @@ def test_registration_requires_only_admin_approval(monkeypatch) -> None:
     assert client.get("/api/v1/users").status_code == 403
 
 
+@pytest.mark.parametrize("decision", ["approved", "rejected"])
 @pytest.mark.parametrize("token_expired", [False, True])
-def test_historical_registration_is_unchanged_and_hidden_from_review(
-    monkeypatch, token_expired
+def test_historical_registration_can_be_reviewed_without_email_verification(
+    monkeypatch, token_expired, decision
 ) -> None:
     client, sessions = make_test_app(monkeypatch)
     seed_admin(sessions)
@@ -264,13 +265,10 @@ def test_historical_registration_is_unchanged_and_hidden_from_review(
         }).status_code == 410
     csrf = login(client, "admin", "long-enough-admin-password")
     registrations = client.get("/api/v1/users/registrations").json()
-    assert len(registrations) == 1
-    assert registrations[0]["status"] == "pending"
-    assert registrations[0]["id"] != str(historical_id)
-    assert client.post(
-        f"/api/v1/users/registrations/{historical_id}/review",
-        json={"decision": "approved"}, headers={"X-CSRF-Token": csrf},
-    ).status_code == 409
+    assert len(registrations) == 2
+    listed_historical = next(item for item in registrations if item["id"] == str(historical_id))
+    assert listed_historical["status"] == "email_pending"
+    assert any(item["status"] == "pending" for item in registrations)
     with sessions() as db:
         historical = db.get(RegistrationRequest, historical_id)
         assert historical.status == "email_pending"
@@ -281,6 +279,40 @@ def test_historical_registration_is_unchanged_and_hidden_from_review(
         assert db.scalar(select(NotificationOutbox).where(
             NotificationOutbox.template == "registration_verify"
         )) is None
+
+    response = client.post(
+        f"/api/v1/users/registrations/{historical_id}/review",
+        json={"decision": decision, "comment": "管理员审核"},
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == decision
+    assert response.json()["email_verified_at"] is None
+    assert client.post(
+        f"/api/v1/users/registrations/{historical_id}/review",
+        json={"decision": decision, "comment": "重复审核"},
+        headers={"X-CSRF-Token": csrf},
+    ).status_code == 409
+    with sessions() as db:
+        historical = db.get(RegistrationRequest, historical_id)
+        assert historical.status == decision
+        assert historical.reviewed_at is not None
+        assert historical.reviewer_id is not None
+        audit = db.scalar(select(AuditEvent).where(AuditEvent.object_id == str(historical_id)))
+        assert audit.before == {"status": "email_pending"}
+        assert audit.after == {"status": decision, "comment": "管理员审核"}
+        user = db.scalar(select(User).where(User.username == "alice"))
+        if decision == "approved":
+            assert user is not None
+            assert user.email_verified_at is None
+            assert historical.created_user_id == user.id
+        else:
+            assert user is None
+            assert historical.created_user_id is None
+    response = client.post(
+        "/api/v1/auth/login", json={"username": "alice", "password": "old-user-password"},
+    )
+    assert response.status_code == (200 if decision == "approved" else 401)
 
 
 def test_registered_user_can_optionally_verify_email_for_password_recovery(monkeypatch) -> None:

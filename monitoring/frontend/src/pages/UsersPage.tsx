@@ -6,6 +6,10 @@ import { api, csrfHeaders, errorMessage } from '../api'
 import { useAuth } from '../auth'
 import type { RegistrationData, UserData } from '../types'
 
+function canReviewRegistration(status: string) {
+  return status === 'email_pending' || status === 'pending'
+}
+
 export function UsersPage() {
   const { session } = useAuth()
   const { message } = App.useApp()
@@ -24,7 +28,7 @@ export function UsersPage() {
         api.get<RegistrationData[]>('/users/registrations'),
       ])
       setUsers(userResponse.data)
-      setRegistrations(registrationResponse.data.filter((item) => item.status !== 'email_pending'))
+      setRegistrations(registrationResponse.data)
     } catch (error) {
       message.error(errorMessage(error))
     } finally {
@@ -93,9 +97,9 @@ export function UsersPage() {
     { title: '姓名', dataIndex: 'full_name' },
     { title: '邮箱', dataIndex: 'email' },
     { title: '提交时间', dataIndex: 'created_at', render: (value) => dayjs(value).format('YYYY-MM-DD HH:mm') },
-    { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === 'pending' ? 'processing' : value === 'approved' ? 'success' : value === 'rejected' ? 'error' : 'default'}>{value === 'pending' ? '待审核' : value === 'approved' ? '已通过' : value === 'rejected' ? '已拒绝' : '未知状态'}</Tag> },
+    { title: '状态', dataIndex: 'status', render: (value) => <Tag color={canReviewRegistration(value) ? 'processing' : value === 'approved' ? 'success' : value === 'rejected' ? 'error' : 'default'}>{canReviewRegistration(value) ? '待审核' : value === 'approved' ? '已通过' : value === 'rejected' ? '已拒绝' : '未知状态'}</Tag> },
     { title: '审核意见', dataIndex: 'review_comment', render: (value) => value || '--' },
-    { title: '操作', width: 100, render: (_, row) => row.status === 'pending' ? <Button type="primary" size="small" onClick={() => setReviewTarget(row)}>审核</Button> : null },
+    { title: '操作', width: 100, render: (_, row) => canReviewRegistration(row.status) ? <Button type="primary" size="small" onClick={() => setReviewTarget(row)}>审核</Button> : null },
   ]
 
   return (
@@ -107,7 +111,7 @@ export function UsersPage() {
       <Card>
         <Tabs items={[
           { key: 'users', label: '正式用户', children: <Table rowKey="id" loading={loading} columns={userColumns} dataSource={users} scroll={{ x: 1000 }} /> },
-          { key: 'registrations', label: `注册审核 (${registrations.filter((item) => item.status === 'pending').length})`, children: <Table rowKey="id" loading={loading} columns={registrationColumns} dataSource={registrations} scroll={{ x: 900 }} /> },
+          { key: 'registrations', label: `注册审核 (${registrations.filter((item) => canReviewRegistration(item.status)).length})`, children: <Table rowKey="id" loading={loading} columns={registrationColumns} dataSource={registrations} scroll={{ x: 900 }} /> },
         ]} />
       </Card>
       <Modal title="审核注册申请" open={!!reviewTarget} onCancel={() => setReviewTarget(null)} onOk={() => reviewForm.submit()} confirmLoading={busy} destroyOnHidden>

@@ -73,7 +73,6 @@ def list_registration_requests(
     registrations = list(
         db.scalars(
             select(RegistrationRequest)
-            .where(RegistrationRequest.status != "email_pending")
             .order_by(RegistrationRequest.created_at.desc())
         )
     )
@@ -97,8 +96,9 @@ def review_registration(
     )
     if registration is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "registration not found")
-    if registration.status != "pending":
+    if registration.status not in ("email_pending", "pending"):
         raise HTTPException(status.HTTP_409_CONFLICT, "registration is not pending")
+    previous_status = registration.status
     now = utcnow()
     if payload.decision == "approved":
         conflict = db.scalar(
@@ -137,7 +137,7 @@ def review_registration(
         f"registration.{payload.decision}",
         "registration_request",
         registration.id,
-        before={"status": "pending"},
+        before={"status": previous_status},
         after={"status": payload.decision, "comment": payload.comment},
     )
     enqueue_notification(

@@ -33,25 +33,38 @@ test('旧验证页面不调用验证接口并引导重新注册', async ({ page 
   expect(verificationRequests).toEqual([])
 })
 
-test('审核列表隐藏历史待验证记录且未知状态不会显示成已拒绝', async ({ page }) => {
+test('历史待验证申请显示为待审核并可直接审核', async ({ page }) => {
+  let legacyStatus = 'email_pending'
   await page.route('**/api/v1/**', async (route) => {
     const path = new URL(route.request().url()).pathname
     let body: unknown = []
     if (path.endsWith('/auth/me')) body = adminSession
+    if (path.endsWith('/users/registrations/legacy/review')) {
+      expect(route.request().postDataJSON().decision).toBe('approved')
+      legacyStatus = 'approved'
+      body = { id: 'legacy', status: legacyStatus }
+    }
     if (path.endsWith('/users/registrations')) body = [
-      { id: 'legacy', username: 'legacy-user', full_name: '旧申请', status: 'email_pending' },
+      { id: 'legacy', username: 'legacy-user', full_name: '旧申请', status: legacyStatus },
       { id: 'new', username: 'new-user', full_name: '新申请', status: 'pending' },
       { id: 'unknown', username: 'unknown-user', full_name: '未知申请', status: 'unexpected' },
     ]
     await route.fulfill({ json: body })
   })
   await page.goto('/users')
-  await page.getByRole('tab', { name: '注册审核 (1)' }).click()
-  await expect(page.getByText('legacy-user', { exact: true })).toHaveCount(0)
+  await page.getByRole('tab', { name: '注册审核 (2)' }).click()
+  await expect(page.getByText('legacy-user', { exact: true })).toBeVisible()
   await expect(page.getByText('new-user', { exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: /^审\s*核$/ })).toHaveCount(1)
+  await expect(page.getByRole('button', { name: /^审\s*核$/ })).toHaveCount(2)
   await expect(page.getByText('未知状态', { exact: true })).toBeVisible()
   await expect(page.getByText('已拒绝', { exact: true })).toHaveCount(0)
+  const legacyRow = page.getByRole('row').filter({ hasText: 'legacy-user' })
+  await expect(legacyRow.getByText('待审核', { exact: true })).toBeVisible()
+  await legacyRow.getByRole('button', { name: /^审\s*核$/ }).click()
+  await page.getByRole('dialog').getByRole('button', { name: /^确\s*定$/ }).click()
+  await expect(page.getByRole('tab', { name: '注册审核 (1)' })).toBeVisible()
+  await expect(legacyRow.getByText('已通过', { exact: true })).toBeVisible()
+  await expect(legacyRow.getByRole('button', { name: /^审\s*核$/ })).toHaveCount(0)
 })
 
 test('登录后可自愿验证当前邮箱', async ({ page }) => {
