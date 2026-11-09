@@ -39,7 +39,6 @@ AUTO_REJECTION_REASONS = {
 }
 
 MAIL_SUBJECTS = {
-    "registration_verify": "验证您的 ComputeDock 邮箱",
     "registration_pending_admin": "有新的用户注册申请待审核",
     "registration_approved": "ComputeDock 注册申请已通过",
     "registration_rejected": "ComputeDock 注册申请已拒绝",
@@ -188,6 +187,12 @@ def process_one_notification(
     )
     if notification is None:
         return False
+    if notification.template == "registration_verify":
+        notification.status = "cancelled"
+        notification.last_error = "注册邮箱验证已停用"
+        notification.updated_at = now
+        db.commit()
+        return True
     notification.status = "sending"
     notification.attempts += 1
     notification.updated_at = now

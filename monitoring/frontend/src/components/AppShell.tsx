@@ -3,6 +3,7 @@ import { Button, Layout, Space, Typography } from 'antd'
 import type { PropsWithChildren } from 'react'
 import { useAuth } from '../auth'
 import { useNavigation } from '../routing'
+import { EmailVerificationPrompt } from './EmailVerificationPrompt'
 
 export function AppShell({ children }: PropsWithChildren) {
   const { session, logout } = useAuth()
@@ -49,6 +50,7 @@ export function AppShell({ children }: PropsWithChildren) {
         </Space>
       </Layout.Header>
       <Layout.Content className="app-content">
+        <EmailVerificationPrompt />
         {children}
       </Layout.Content>
     </Layout>

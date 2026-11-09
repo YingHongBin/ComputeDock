@@ -35,8 +35,8 @@ export default function App() {
   else if (path === '/resend-verification') page = <ResendVerificationPage />
   else if (path === '/forgot-password') page = <ForgotPasswordPage />
   else if (path === '/reset-password') page = <ResetPasswordPage />
-  else if (path === '/verify-email') page = <EmailVerificationPage />
-  else if (path === '/verify-new-email') page = <EmailVerificationPage emailChange />
+  else if (path === '/verify-email') page = <ResendVerificationPage />
+  else if (path === '/verify-new-email') page = <EmailVerificationPage />
   else if (!session) page = <Redirect to="/login" />
   else if (path === '/') page = <AppShell><OverviewPage /></AppShell>
   else if (path === '/requests') page = <AppShell><RequestsPage /></AppShell>

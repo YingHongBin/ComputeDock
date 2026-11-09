@@ -1,23 +1,28 @@
 import { Alert, Button, Card, Spin, Typography } from 'antd'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, errorMessage } from '../api'
 import { useAuth } from '../auth'
 import { useNavigation } from '../routing'
 
-export function EmailVerificationPage({ emailChange = false }: { emailChange?: boolean }) {
+export function EmailVerificationPage() {
   const { navigate } = useNavigation()
   const { refresh } = useAuth()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const submittedToken = useRef('')
   const token = new URLSearchParams(window.location.search).get('token') ?? ''
 
   useEffect(() => {
     if (!token) { setError('验证链接缺少 Token'); setLoading(false); return }
-    api.post(emailChange ? '/auth/email/change-confirm' : '/auth/verify-email', { token })
-      .then(() => emailChange ? refresh() : undefined)
+    if (submittedToken.current === token) return
+    submittedToken.current = token
+    setLoading(true)
+    setError('')
+    api.post('/auth/email/change-confirm', { token })
+      .then(() => refresh())
       .catch((requestError) => setError(errorMessage(requestError)))
       .finally(() => setLoading(false))
-  }, [emailChange, token])
+  }, [refresh, token])
 
   return (
     <main className="login-page">
@@ -26,11 +31,10 @@ export function EmailVerificationPage({ emailChange = false }: { emailChange?: b
         {loading ? <Spin /> : error
           ? <>
               <Alert type="error" showIcon message={error} />
-              {!emailChange && <Button type="link" block onClick={() => navigate('/resend-verification')}>重新发送验证邮件</Button>}
             </>
-          : <Alert type="success" showIcon message={emailChange ? '新邮箱已绑定。' : '邮箱已验证，注册申请已提交管理员审核。'} />}
-        <Button block className="form-footer-button" onClick={() => navigate(emailChange ? '/' : '/login')}>
-          {emailChange ? '返回平台' : '返回登录'}
+          : <Alert type="success" showIcon message="邮箱已验证，可用于找回密码。" />}
+        <Button block className="form-footer-button" onClick={() => navigate('/')}>
+          返回平台
         </Button>
       </Card>
     </main>

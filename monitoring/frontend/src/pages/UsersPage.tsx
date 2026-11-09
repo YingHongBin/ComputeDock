@@ -24,7 +24,7 @@ export function UsersPage() {
         api.get<RegistrationData[]>('/users/registrations'),
       ])
       setUsers(userResponse.data)
-      setRegistrations(registrationResponse.data)
+      setRegistrations(registrationResponse.data.filter((item) => item.status !== 'email_pending'))
     } catch (error) {
       message.error(errorMessage(error))
     } finally {
@@ -82,7 +82,7 @@ export function UsersPage() {
         <Space wrap>
           <Button size="small" disabled={row.username === session?.username} onClick={() => void updateUser(row, { status: row.status === 'active' ? 'disabled' : 'active' })}>{row.status === 'active' ? '禁用' : '启用'}</Button>
           <Button size="small" disabled={row.username === session?.username} onClick={() => void updateUser(row, { role: row.role === 'admin' ? 'user' : 'admin' })}>{row.role === 'admin' ? '降为普通用户' : '设为管理员'}</Button>
-          <Button size="small" onClick={() => void resetPassword(row)}>发送重置邮件</Button>
+          <Button size="small" disabled={!row.email_verified_at} title={!row.email_verified_at ? '用户验证邮箱后可发送重置邮件' : undefined} onClick={() => void resetPassword(row)}>发送重置邮件</Button>
         </Space>
       ),
     },
@@ -93,7 +93,7 @@ export function UsersPage() {
     { title: '姓名', dataIndex: 'full_name' },
     { title: '邮箱', dataIndex: 'email' },
     { title: '提交时间', dataIndex: 'created_at', render: (value) => dayjs(value).format('YYYY-MM-DD HH:mm') },
-    { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === 'pending' ? 'processing' : value === 'approved' ? 'success' : 'error'}>{value === 'pending' ? '待审核' : value === 'approved' ? '已通过' : '已拒绝'}</Tag> },
+    { title: '状态', dataIndex: 'status', render: (value) => <Tag color={value === 'pending' ? 'processing' : value === 'approved' ? 'success' : value === 'rejected' ? 'error' : 'default'}>{value === 'pending' ? '待审核' : value === 'approved' ? '已通过' : value === 'rejected' ? '已拒绝' : '未知状态'}</Tag> },
     { title: '审核意见', dataIndex: 'review_comment', render: (value) => value || '--' },
     { title: '操作', width: 100, render: (_, row) => row.status === 'pending' ? <Button type="primary" size="small" onClick={() => setReviewTarget(row)}>审核</Button> : null },
   ]

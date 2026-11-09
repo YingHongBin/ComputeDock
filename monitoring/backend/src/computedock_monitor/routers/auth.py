@@ -90,43 +90,21 @@ def set_session_cookies(
 def matching_active_registration(
     db: Session, username: str, email: str
 ) -> RegistrationRequest | None:
-    now = utcnow()
-    requests = list(
-        db.scalars(
-            select(RegistrationRequest).where(
-                RegistrationRequest.status.in_(("email_pending", "pending")),
-                or_(
-                    func.lower(RegistrationRequest.username) == username.lower(),
-                    func.lower(RegistrationRequest.email) == email.lower(),
-                ),
-            )
+    return db.scalar(
+        select(RegistrationRequest).where(
+            RegistrationRequest.status.in_(("email_pending", "pending")),
+            or_(
+                func.lower(RegistrationRequest.username) == username.lower(),
+                func.lower(RegistrationRequest.email) == email.lower(),
+            ),
         )
     )
-    for registration in requests:
-        if registration.status == "email_pending":
-            valid_token = db.scalar(
-                select(EmailActionToken.id).where(
-                    EmailActionToken.registration_request_id == registration.id,
-                    EmailActionToken.purpose == "registration_verify",
-                    EmailActionToken.consumed_at.is_(None),
-                    EmailActionToken.expires_at > now,
-                )
-            )
-            if valid_token is None:
-                registration.status = "rejected"
-                registration.review_comment = "邮箱验证已过期"
-                registration.reviewed_at = now
-                registration.updated_at = now
-                continue
-        return registration
-    return None
 
 
 @router.post("/register", status_code=status.HTTP_202_ACCEPTED)
 def register(
     payload: RegistrationInput,
     db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
 ) -> dict[str, str]:
     existing_user = db.scalar(
         select(User.id).where(
@@ -148,127 +126,36 @@ def register(
         full_name=payload.full_name,
         email=payload.email,
         password_hash=hash_password(payload.password),
-        status="email_pending",
+        status="pending",
         created_at=now,
         updated_at=now,
     )
-    db.add(registration)
-    email_token, secret = issue_action_token(
-        db,
-        purpose="registration_verify",
-        registration_request_id=registration.id,
-    )
-    enqueue_notification(
-        db,
-        idempotency_key=f"registration-verify:{registration.id}:{email_token.id}",
-        template="registration_verify",
-        to_address=registration.email,
-        payload={
-            "full_name": registration.full_name,
-            "action_url": action_url(db, settings, "/verify-email", secret),
-            "expires_hours": 24,
-        },
-    )
     try:
+        db.add(registration)
+        enqueue_admin_notice(
+            db,
+            idempotency_key=f"registration-pending:{registration.id}",
+            template="registration_pending_admin",
+            payload={
+                "username": registration.username,
+                "full_name": registration.full_name,
+                "email": registration.email,
+            },
+        )
         db.commit()
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(status.HTTP_409_CONFLICT, "username or email is unavailable") from exc
-    return {"status": "verification_sent"}
+    return {"status": "pending"}
 
 
-@router.post("/registration/resend", status_code=status.HTTP_202_ACCEPTED)
-def resend_registration_verification(
-    payload: PasswordResetRequest,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
-) -> dict[str, str]:
-    """Send a fresh link without revealing whether a pending registration exists."""
-    identity = payload.identity.strip().lower()
-    registration = db.scalar(
-        select(RegistrationRequest)
-        .where(
-            RegistrationRequest.status == "email_pending",
-            or_(
-                func.lower(RegistrationRequest.username) == identity,
-                func.lower(RegistrationRequest.email) == identity,
-            ),
-        )
-        .order_by(RegistrationRequest.created_at.desc())
+@router.post("/registration/resend", status_code=status.HTTP_410_GONE)
+@router.post("/verify-email", status_code=status.HTTP_410_GONE)
+def registration_verification_retired() -> None:
+    raise HTTPException(
+        status.HTTP_410_GONE,
+        "注册已改为管理员审核，无需验证邮箱。",
     )
-    if registration is not None:
-        email_token, secret = issue_action_token(
-            db,
-            purpose="registration_verify",
-            registration_request_id=registration.id,
-        )
-        enqueue_notification(
-            db,
-            idempotency_key=f"registration-verify:{registration.id}:{email_token.id}",
-            template="registration_verify",
-            to_address=registration.email,
-            payload={
-                "full_name": registration.full_name,
-                "action_url": action_url(db, settings, "/verify-email", secret),
-                "expires_hours": 24,
-            },
-        )
-        registration.updated_at = utcnow()
-        db.commit()
-    return {"status": "verification_sent"}
-
-
-@router.post("/verify-email", status_code=status.HTTP_204_NO_CONTENT)
-def verify_registration_email(
-    payload: EmailTokenInput,
-    db: Session = Depends(get_db),
-) -> Response:
-    now = utcnow()
-    token = db.scalar(
-        select(EmailActionToken)
-        .where(
-            EmailActionToken.token_hash == digest_secret(payload.token),
-            EmailActionToken.purpose == "registration_verify",
-        )
-        .with_for_update()
-    )
-    if token is None or token.consumed_at is not None or is_expired(token.expires_at, now):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "verification link is invalid or expired")
-    registration = db.get(RegistrationRequest, token.registration_request_id)
-    if registration is None or registration.status != "email_pending":
-        raise HTTPException(status.HTTP_409_CONFLICT, "registration is no longer pending")
-    conflict = db.scalar(
-        select(User.id).where(
-            or_(
-                func.lower(User.username) == registration.username.lower(),
-                func.lower(User.email) == registration.email.lower(),
-            )
-        )
-    )
-    if conflict is not None:
-        registration.status = "rejected"
-        registration.review_comment = "用户名或邮箱已被使用"
-        registration.reviewed_at = now
-        registration.updated_at = now
-        token.consumed_at = now
-        db.commit()
-        raise HTTPException(status.HTTP_409_CONFLICT, "username or email is unavailable")
-    token.consumed_at = now
-    registration.status = "pending"
-    registration.email_verified_at = now
-    registration.updated_at = now
-    enqueue_admin_notice(
-        db,
-        idempotency_key=f"registration-pending:{registration.id}",
-        template="registration_pending_admin",
-        payload={
-            "username": registration.username,
-            "full_name": registration.full_name,
-            "email": registration.email,
-        },
-    )
-    db.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/login", response_model=AdminView)

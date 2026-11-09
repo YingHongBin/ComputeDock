@@ -24,13 +24,17 @@
    curl http://127.0.0.1:8001/api/health
    ```
 
-3. 浏览器访问 `http://127.0.0.1:8000`。普通用户完成邮箱验证后还需管理员审核，审核通过才能登录。
+3. 浏览器访问 `http://127.0.0.1:8000`。普通用户提交注册后直接进入管理员审核，无需验证邮箱，审核通过才能登录。
 
-若未配置 SMTP，业务数据仍会保存，但邮件会留在待重试队列中；注册验证、密码重置和通知邮件将无法送达。
+若未配置 SMTP，业务数据仍会保存，但邮件会留在待重试队列中；自愿邮箱验证、密码重置和通知邮件将无法送达，但不影响注册、审核和登录。
 
 管理员可在“设置”页维护 SMTP Host、端口、用户名、密码、发件邮箱、发件人名称和 TLS，并向当前管理员绑定邮箱发送测试邮件。数据库中保存过配置后将优先于 `.env`，Worker 会在下一次轮询时自动读取，无需重启；SMTP 密码不会通过 API 或页面回传。启用 TLS 时，465 端口使用隐式 TLS，其他端口使用 STARTTLS。
 
 ## 用户、Squad与算力申请
+
+注册邮箱仍必填，管理员审核不会将邮箱标记为已验证。用户登录后可通过页面中的“验证邮箱”入口自愿验证，验证后才能使用邮箱找回密码；管理员也只能向已验证邮箱发送密码重置邮件。
+
+历史 `email_pending` 注册申请保持原样，不进入审核列表、不计入待审核数量。本次不调整数据库及原有唯一性规则，也不处理历史申请的重新注册。旧注册验证与重发接口返回 410，旧页面提示注册无需验证邮箱，Worker 不再发送历史注册验证邮件。
 
 - 普通用户可以查看当前算力资源和容器使用情况、提交算力申请，并对自己已通过且未到期的申请提交时间调整或配置调整申请。
 - 管理员与普通用户使用相同的申请规则，也可以审批自己的申请。只有管理员能审核注册和算力申请、管理用户/Squad、创建或编辑资源、禁用资源、移除容器及查看历史面板。
@@ -91,17 +95,22 @@ location /monitor/ {
 
 app、collector 和 worker 使用独立构建目标、镜像和版本标签，运行时都只依赖 database，可以分别更新。`APP_IMAGE_TAG`、`COLLECTOR_IMAGE_TAG` 和 `WORKER_IMAGE_TAG` 可单独指定；未指定时均回退到 `MONITORING_IMAGE_TAG`。
 
-当前版本采用全新数据库 Schema，不支持从旧版数据库原地升级。部署当前版本前需要由运维人员显式删除旧数据库卷并创建空数据库；应用本身不会自动删除数据：
+数据库迁移由 app 在启动管理服务前执行，collector 和 worker 不执行 Alembic。全新数据库只执行 `0001_initial`，本次注册流程调整不新增数据库迁移。
+
+已运行 `0001_initial` 的部署只需更新 app 和 worker，无需修改数据库或删除数据库卷。先停止旧 worker，更新并启动 app，再启动新 worker，避免旧 worker 继续发送注册验证邮件：
 
 ```shell
-docker compose down
-docker volume ls
-# 确认实际数据库卷名称后，再显式删除该卷
-docker volume rm <database-volume-name>
-docker compose up --build -d
+docker compose build app worker
+docker compose stop worker
+docker compose up -d --no-deps --force-recreate app
+docker compose logs --tail=100 app
+# 确认 app 服务健康后启动 worker
+docker compose up -d --no-deps --force-recreate worker
 ```
 
-数据库迁移由 app 在启动管理服务前执行，collector 和 worker 不执行 Alembic。全新数据库只执行单一的 `0001_initial`。完成首次部署后，app、collector 和 worker仍可使用独立镜像标签分别更新：
+更早、尚未采用 `0001_initial` 的旧数据库不在本次原地升级支持范围内。
+
+完成首次部署后，app、collector 和 worker仍可使用独立镜像标签分别更新：
 
 ```shell
 docker compose build app

@@ -12,7 +12,6 @@ from .models import EmailActionToken, NotificationOutbox, SystemSetting, User
 from .security import digest_secret, make_email_action_token, utcnow
 
 ACTION_TOKEN_LIFETIMES = {
-    "registration_verify": timedelta(hours=24),
     "password_reset": timedelta(minutes=30),
     "email_change": timedelta(hours=24),
 }

@@ -27,11 +27,10 @@ export function RegisterPage() {
       <Card className="login-card">
         <div className="login-brand">C</div>
         <Typography.Title level={2}>注册 ComputeDock</Typography.Title>
-        <Typography.Paragraph type="secondary">验证邮箱后，注册申请将交由管理员审核。</Typography.Paragraph>
+        <Typography.Paragraph type="secondary">提交注册后，申请将交由管理员审核，无需验证邮箱。</Typography.Paragraph>
         {sent ? (
           <>
-            <Alert type="success" showIcon message="验证邮件已发送，请在 24 小时内完成验证。" />
-            <Button type="link" block onClick={() => navigate('/resend-verification')}>没有收到？重新发送</Button>
+            <Alert type="success" showIcon message="注册申请已提交，请等待管理员审核。" />
             <Button block className="form-footer-button" onClick={() => navigate('/login')}>返回登录</Button>
           </>
         ) : (

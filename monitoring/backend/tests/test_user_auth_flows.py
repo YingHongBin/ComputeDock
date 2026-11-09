@@ -4,6 +4,7 @@ import uuid
 from collections.abc import Generator
 from datetime import UTC, date, datetime, timedelta
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, select
@@ -41,10 +42,11 @@ from computedock_monitor.routers import (
     users,
 )
 from computedock_monitor.routers import settings as settings_router
-from computedock_monitor.security import hash_password, utcnow, verify_password
+from computedock_monitor.security import digest_secret, hash_password, utcnow, verify_password
 from computedock_monitor.services import authenticate_reporting_token
 from computedock_monitor.worker import (
     enqueue_low_utilization_warnings,
+    process_one_notification,
     summarize_pending_containers,
 )
 
@@ -163,7 +165,7 @@ def test_initial_admin_is_a_verified_user(monkeypatch) -> None:
         assert verify_password(admin.password_hash, "long-enough-initial-password")
 
 
-def test_verified_registration_requires_admin_approval(monkeypatch) -> None:
+def test_registration_requires_only_admin_approval(monkeypatch) -> None:
     client, sessions = make_test_app(monkeypatch)
     seed_admin(sessions)
     response = client.post(
@@ -177,15 +179,20 @@ def test_verified_registration_requires_admin_approval(monkeypatch) -> None:
     )
     assert response.status_code == 202
 
-    response = client.post(
-        "/api/v1/auth/verify-email",
-        json={"token": "known-email-action-token-with-enough-length"},
-    )
-    assert response.status_code == 204
+    assert response.json() == {"status": "pending"}
+    assert client.post(
+        "/api/v1/auth/login",
+        json={"username": "alice", "password": "long-enough-user-password"},
+    ).status_code == 401
     with sessions() as db:
         registration = db.scalar(select(RegistrationRequest))
         assert registration is not None
         assert registration.status == "pending"
+        assert registration.email_verified_at is None
+        assert db.scalar(select(EmailActionToken)) is None
+        assert db.scalar(select(NotificationOutbox).where(
+            NotificationOutbox.template == "registration_verify"
+        )) is None
         assert db.scalar(
             select(NotificationOutbox).where(
                 NotificationOutbox.template == "registration_pending_admin"
@@ -199,73 +206,156 @@ def test_verified_registration_requires_admin_approval(monkeypatch) -> None:
         headers={"X-CSRF-Token": csrf},
     )
     assert response.status_code == 200, response.text
+    assert client.post(
+        f"/api/v1/users/registrations/{registration.id}/review",
+        json={"decision": "approved"},
+        headers={"X-CSRF-Token": csrf},
+    ).status_code == 409
     client.post("/api/v1/auth/logout", headers={"X-CSRF-Token": csrf})
     user_csrf = login(client, "alice", "long-enough-user-password")
     assert user_csrf
+    assert client.get("/api/v1/auth/me").json()["email_verified"] is False
     assert client.get("/api/v1/users").status_code == 403
 
 
-def test_registration_verification_can_be_resent_and_invalidates_old_link(monkeypatch) -> None:
+@pytest.mark.parametrize("token_expired", [False, True])
+def test_historical_registration_is_unchanged_and_hidden_from_review(
+    monkeypatch, token_expired
+) -> None:
     client, sessions = make_test_app(monkeypatch)
-    tokens = iter(
-        (
-            "first-registration-token-with-enough-length",
-            "second-registration-token-with-enough-length",
+    seed_admin(sessions)
+    now = utcnow()
+    historical_id = uuid.uuid4()
+    with sessions() as db:
+        historical = RegistrationRequest(
+            id=historical_id, username="alice", full_name="Historical Alice",
+            email="alice@example.test", password_hash=hash_password("old-user-password"),
+            status="email_pending", created_at=now, updated_at=now,
         )
-    )
+        db.add(historical)
+        db.add(EmailActionToken(
+            id=uuid.uuid4(), purpose="registration_verify",
+            registration_request_id=historical_id,
+            token_hash=digest_secret("old-registration-token-with-enough-length"),
+            expires_at=now + timedelta(days=-1 if token_expired else 1), created_at=now,
+        ))
+        db.commit()
+    payload = {
+        "username": "ALICE", "full_name": "New Alice", "email": "ALICE@example.test",
+        "password": "long-enough-user-password",
+    }
+    assert client.post("/api/v1/auth/register", json=payload).status_code == 409
+    payload = {**payload, "username": "new-user", "email": "new-user@example.test"}
+    response = client.post("/api/v1/auth/register", json=payload)
+    assert response.status_code == 202, response.text
+    assert client.post("/api/v1/auth/register", json=payload).status_code == 409
+    assert client.post("/api/v1/auth/register", json={
+        **payload, "username": "another-user",
+    }).status_code == 409
+    assert client.post("/api/v1/auth/register", json={
+        **payload, "email": "another@example.test",
+    }).status_code == 409
+    assert client.post("/api/v1/auth/verify-email", json={
+        "token": "old-registration-token-with-enough-length",
+    }).status_code == 410
+    for identity in ("alice", "unknown@example.test"):
+        assert client.post("/api/v1/auth/registration/resend", json={
+            "identity": identity,
+        }).status_code == 410
+    csrf = login(client, "admin", "long-enough-admin-password")
+    registrations = client.get("/api/v1/users/registrations").json()
+    assert len(registrations) == 1
+    assert registrations[0]["status"] == "pending"
+    assert registrations[0]["id"] != str(historical_id)
+    assert client.post(
+        f"/api/v1/users/registrations/{historical_id}/review",
+        json={"decision": "approved"}, headers={"X-CSRF-Token": csrf},
+    ).status_code == 409
+    with sessions() as db:
+        historical = db.get(RegistrationRequest, historical_id)
+        assert historical.status == "email_pending"
+        assert historical.email_verified_at is None
+        assert historical.reviewed_at is None
+        assert historical.review_comment is None
+        assert historical.updated_at.replace(tzinfo=UTC) == now
+        assert db.scalar(select(NotificationOutbox).where(
+            NotificationOutbox.template == "registration_verify"
+        )) is None
+
+
+def test_registered_user_can_optionally_verify_email_for_password_recovery(monkeypatch) -> None:
+    client, sessions = make_test_app(monkeypatch)
+    seed_admin(sessions)
+    client.post("/api/v1/auth/register", json={
+        "username": "alice", "full_name": "Alice", "email": "alice@example.test",
+        "password": "long-enough-user-password",
+    })
+    csrf = login(client, "admin", "long-enough-admin-password")
+    registration = client.get("/api/v1/users/registrations").json()[0]
+    assert client.post(
+        f"/api/v1/users/registrations/{registration['id']}/review",
+        json={"decision": "approved"}, headers={"X-CSRF-Token": csrf},
+    ).status_code == 200
+    with sessions() as db:
+        user = db.scalar(select(User).where(User.username == "alice"))
+        user_id = user.id
+    assert client.post(
+        f"/api/v1/users/{user_id}/password-reset", headers={"X-CSRF-Token": csrf},
+    ).status_code == 409
+    client.post("/api/v1/auth/password/reset-request", json={"identity": "alice"})
+    with sessions() as db:
+        assert db.scalar(select(EmailActionToken)) is None
+    csrf = login(client, "alice", "long-enough-user-password")
+    assert client.post(
+        "/api/v1/auth/email/change-request",
+        json={"new_email": "alice@example.test", "current_password": "wrong-password"},
+        headers={"X-CSRF-Token": csrf},
+    ).status_code == 400
+    assert client.post(
+        "/api/v1/auth/email/change-request",
+        json={"new_email": "alice@example.test", "current_password": "long-enough-user-password"},
+        headers={"X-CSRF-Token": csrf},
+    ).status_code == 202
+    assert client.post("/api/v1/auth/email/change-confirm", json={
+        "token": "known-email-action-token-with-enough-length",
+    }).status_code == 204
+    assert client.get("/api/v1/auth/me").json()["email_verified"] is True
     monkeypatch.setattr(
         "computedock_monitor.notifications.make_email_action_token",
-        lambda: next(tokens),
+        lambda: "password-reset-token-with-enough-length",
     )
-    response = client.post(
-        "/api/v1/auth/register",
-        json={
-            "username": "resend-user",
-            "full_name": "Resend User",
-            "email": "resend@example.test",
-            "password": "long-enough-user-password",
-        },
-    )
-    assert response.status_code == 202
+    client.post("/api/v1/auth/password/reset-request", json={"identity": "alice"})
+    assert client.post("/api/v1/auth/password/reset", json={
+        "token": "password-reset-token-with-enough-length",
+        "new_password": "new-long-enough-password",
+    }).status_code == 204
+    assert client.get("/api/v1/auth/me").status_code == 401
+    login(client, "alice", "new-long-enough-password")
 
-    response = client.post(
-        "/api/v1/auth/registration/resend",
-        json={"identity": "RESEND@EXAMPLE.TEST"},
+
+def test_legacy_verification_mail_is_cancelled_without_sending(monkeypatch) -> None:
+    from computedock_monitor.notifications import enqueue_notification
+    from computedock_monitor.smtp import SmtpConnectionSettings
+
+    _client, sessions = make_test_app(monkeypatch)
+    settings = Settings()
+    smtp = SmtpConnectionSettings(
+        host="smtp.example.test", port=587, username="", password="",
+        from_email="admin@example.test", from_name="ComputeDock", use_tls=True,
     )
-    assert response.status_code == 202
-    assert (
-        client.post(
-            "/api/v1/auth/verify-email",
-            json={"token": "first-registration-token-with-enough-length"},
-        ).status_code
-        == 400
-    )
-    assert (
-        client.post(
-            "/api/v1/auth/verify-email",
-            json={"token": "second-registration-token-with-enough-length"},
-        ).status_code
-        == 204
-    )
+    sent = []
+    monkeypatch.setattr("computedock_monitor.worker.send_notification", lambda *args: sent.append(args))
     with sessions() as db:
-        notices = list(
-            db.scalars(
-                select(NotificationOutbox).where(
-                    NotificationOutbox.template == "registration_verify"
-                )
-            )
+        notice = enqueue_notification(
+            db, idempotency_key="legacy-verification", template="registration_verify",
+            to_address="alice@example.test", payload={},
         )
-        assert len(notices) == 2
-
-
-def test_registration_resend_does_not_reveal_unknown_identity(monkeypatch) -> None:
-    client, _ = make_test_app(monkeypatch)
-    response = client.post(
-        "/api/v1/auth/registration/resend",
-        json={"identity": "unknown@example.test"},
-    )
-    assert response.status_code == 202
-    assert response.json() == {"status": "verification_sent"}
+        db.commit()
+        assert process_one_notification(db, settings, smtp)
+        assert notice.status == "cancelled"
+        assert notice.attempts == 0
+        assert sent == []
+        assert not process_one_notification(db, settings, smtp)
 
 
 def test_rejection_requires_comment(monkeypatch) -> None:
@@ -465,22 +555,16 @@ def test_admin_can_set_api_base_url_for_email_links(monkeypatch) -> None:
     }
 
     response = client.post(
-        "/api/v1/auth/register",
-        json={
-            "username": "base-url-user",
-            "full_name": "Base URL User",
-            "email": "base-url@example.test",
-            "password": "long-enough-user-password",
-        },
+        "/api/v1/auth/password/reset-request", json={"identity": "admin"},
     )
-    assert response.status_code == 202, response.text
+    assert response.status_code == 204, response.text
     with sessions() as db:
         notice = db.scalar(
-            select(NotificationOutbox).where(NotificationOutbox.template == "registration_verify")
+            select(NotificationOutbox).where(NotificationOutbox.template == "password_reset")
         )
         assert notice is not None
         assert notice.payload["action_url"].startswith(
-            "https://public.example.test/monitor/verify-email?token="
+            "https://public.example.test/monitor/reset-password?token="
         )
 
 
